@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "dev": "tsx watch --clear-screen=false --ignore ./.next --ignore ./data server.ts",
+    "dev:docker": "docker compose -f docker-compose.dev.yml up --build",
     "build": "next build",
     "start": "NODE_ENV=production tsx server.ts",
     "lint": "eslint .",
