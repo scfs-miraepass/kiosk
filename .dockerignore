@@ -14,3 +14,4 @@ tests
 Dockerfile
 .dockerignore
 README.md
+dist
