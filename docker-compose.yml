@@ -1,0 +1,29 @@
+# 프로덕션: GitHub Actions가 GHCR에 올린 이미지를 실행합니다.
+#   docker compose up -d
+#   특정 버전: KIOSK_TAG=1.2.3 docker compose up -d
+services:
+  kiosk:
+    image: ghcr.io/scfs-miraepass/kiosk:${KIOSK_TAG:-latest}
+    container_name: miraepass-kiosk
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # 컨테이너 내부 값은 고정하고, 외부 포트만 .env의 PORT로 바꿉니다.
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_PATH: /app/data/cafe.db
+      UPLOAD_DIR: /app/data/uploads
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      # SQLite DB와 업로드된 메뉴 이미지
+      - kiosk-data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  kiosk-data:

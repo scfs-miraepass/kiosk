@@ -1,0 +1,23 @@
+# 개발: 소스를 마운트해 tsx watch + Next dev(HMR)로 실행합니다.
+#   docker compose -f docker-compose.dev.yml up --build
+#   의존성을 바꾼 뒤에는: docker compose -f docker-compose.dev.yml up --build -V
+services:
+  kiosk:
+    build:
+      context: .
+      target: dev
+    container_name: miraepass-kiosk-dev
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      # 파일 변경이 감지되지 않으면 주석을 해제하세요.
+      # WATCHPACK_POLLING: "true"
+      # CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - .:/app
+      # 호스트(macOS)의 node_modules·.next 대신 컨테이너 것을 사용합니다.
+      - /app/node_modules
+      - /app/.next
