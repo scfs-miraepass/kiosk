@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AnimatedListItem } from "@/components/ui/animated-list";
@@ -70,6 +71,7 @@ export function callText(voice: VoiceSettings, p: OrderCallPayload) {
 
 export function StaffBoard() {
   const qc = useQueryClient();
+  const router = useRouter();
   const me = useMe();
   const status = useStoreStatus();
   const settings = usePublicSettings();
@@ -159,7 +161,7 @@ export function StaffBoard() {
   const logout = async () => {
     await api("/api/auth/logout", { method: "POST" }).catch(() => undefined);
     qc.clear();
-    window.location.replace("/staff/login");
+    router.replace("/staff/login");
   };
 
   const isAdmin = me.data?.role === "admin";
@@ -317,7 +319,7 @@ export function StaffBoard() {
 function Clock({ now }: { now: number }) {
   return (
     <span className="hidden text-sm font-semibold text-muted-foreground tabular-nums sm:inline">
-      {now ? new Date(now).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }) : ""}
+      {new Date(now).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}
     </span>
   );
 }
