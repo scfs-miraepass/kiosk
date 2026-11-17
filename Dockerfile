@@ -60,11 +60,13 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/drizzle ./drizzle
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/.next ./.next
+COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN rm -rf .next/cache && mkdir -p data && chown node:node data
 
-USER node
+# USER는 지정하지 않습니다. 엔트리포인트가 /app/data 권한을 맞춘 뒤 node 사용자로 전환합니다.
 EXPOSE 3000
 # SQLite DB와 업로드된 메뉴 이미지가 저장되는 위치
 VOLUME ["/app/data"]
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "dist/server.mjs"]
