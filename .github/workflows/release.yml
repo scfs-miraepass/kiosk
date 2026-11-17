@@ -51,19 +51,15 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Enable Corepack
-        run: corepack enable
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: 'yarn'
 
-      # 설치 스크립트를 건너뛰어 pre-commit 훅이 설치되지 않게 합니다.
-      # 훅이 있으면 릴리스 커밋마다 타입 검사가 실행됩니다.
+
       - name: Install dependencies
-        run: yarn install --immutable --mode=skip-build
+        run: yarn install --frozen-lockfile
 
       - name: Run semantic-release
         env:
@@ -115,9 +111,6 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Enable Corepack
-        run: corepack enable
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -125,7 +118,7 @@ jobs:
           cache: 'yarn'
 
       - name: Install dependencies
-        run: yarn install --immutable --mode=skip-build
+        run: yarn install --frozen-lockfile
 
       - name: Create release commit and tag
         id: release
