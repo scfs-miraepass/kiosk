@@ -3,7 +3,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ClipboardList, Coffee, LayoutDashboard, LogOut, MonitorSmartphone, Settings, Store } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Sidebar,
   SidebarContent,
@@ -34,6 +34,7 @@ const NAV = [
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const qc = useQueryClient();
   const me = useMe();
   const status = useStoreStatus();
@@ -52,7 +53,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const logout = async () => {
     await api("/api/auth/logout", { method: "POST" }).catch(() => undefined);
     qc.clear();
-    window.location.replace("/admin/login");
+    router.replace("/admin/login");
   };
 
   const current = NAV.find((n) => (n.href === "/admin" ? pathname === "/admin" : pathname.startsWith(n.href)));

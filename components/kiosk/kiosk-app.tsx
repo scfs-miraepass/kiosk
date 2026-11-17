@@ -9,7 +9,7 @@ import { useIdleTimer } from "@/hooks/use-idle-timer";
 import { useSocket } from "@/hooks/use-socket";
 import { qk } from "@/lib/query-keys";
 import type { MenuItemDTO } from "@/lib/types";
-import { kioskTokenAtom, paymentPendingAtom, resetKioskAtom, stepAtom, syncCartWithMenuAtom, type KioskStep } from "@/store/kiosk";
+import { kioskTokenAtom, resetKioskAtom, stepAtom, syncCartWithMenuAtom, type KioskStep } from "@/store/kiosk";
 import { AttractScreen } from "./attract-screen";
 import { ClosedScreen } from "./closed-screen";
 import { DoneScreen } from "./done-screen";
@@ -17,13 +17,14 @@ import { ErrorScreen } from "./error-screen";
 import { IdentifyScreen } from "./identify-screen";
 import { KioskSetup } from "./kiosk-setup";
 import { MenuScreen } from "./menu-screen";
+import { PayingScreen } from "./paying-screen";
 import { PinScreen } from "./pin-screen";
 import { ReviewScreen } from "./review-screen";
 
 /** 입력 중인 단계: 이때만 무입력 타이머로 대기화면 복귀 */
 const INTERACTIVE: KioskStep[] = ["menu", "review", "identify", "pin", "error"];
-/** 결제 완료 화면은 영업 종료 화면으로 끊지 않는다 (결제 진행 중은 paymentPendingAtom으로 판단) */
-const UNINTERRUPTIBLE: KioskStep[] = ["done"];
+/** 결제 진행/완료 중에는 영업 종료 화면으로 끊지 않는다 */
+const UNINTERRUPTIBLE: KioskStep[] = ["paying", "done"];
 
 const useMounted = () =>
   useSyncExternalStore(
@@ -45,8 +46,6 @@ function KioskFlow({ token }: { token: string }) {
   const [step, setStep] = useAtom(stepAtom);
   const reset = useSetAtom(resetKioskAtom);
   const syncCart = useSetAtom(syncCartWithMenuAtom);
-  const paying = useAtomValue(paymentPendingAtom);
-  const locked = paying || UNINTERRUPTIBLE.includes(step);
   const menu = useMenu();
   const status = useStoreStatus();
   const settings = usePublicSettings();
@@ -71,7 +70,7 @@ function KioskFlow({ token }: { token: string }) {
     return map;
   }, [menu.data]);
   useEffect(() => {
-    if (menu.data && !locked) syncCart(menuMap);
+    if (menu.data && !UNINTERRUPTIBLE.includes(step)) syncCart(menuMap);
     // step 변화로는 다시 맞출 필요 없음
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [menuMap, syncCart]);
@@ -80,12 +79,12 @@ function KioskFlow({ token }: { token: string }) {
   const goHome = useCallback(() => reset("attract"), [reset]);
   const finish = useCallback(() => reset("attract"), [reset]);
 
-  useIdleTimer(kiosk.idleSeconds, goHome, INTERACTIVE.includes(step) && !paying);
+  useIdleTimer(kiosk.idleSeconds, goHome, INTERACTIVE.includes(step));
 
   const closed = status.data && !status.data.open;
   useEffect(() => {
-    if (closed && !locked && step !== "attract") reset("attract");
-  }, [closed, locked, step, reset]);
+    if (closed && !UNINTERRUPTIBLE.includes(step) && step !== "attract") reset("attract");
+  }, [closed, step, reset]);
 
   if (menu.isPending || status.isPending) return <FullscreenLoader />;
   if (menu.isError) {
@@ -98,7 +97,7 @@ function KioskFlow({ token }: { token: string }) {
       </div>
     );
   }
-  if (closed && !locked) return <ClosedScreen status={status.data!} />;
+  if (closed && !UNINTERRUPTIBLE.includes(step)) return <ClosedScreen status={status.data!} />;
 
   return (
     <div className="kiosk-surface h-dvh overflow-hidden">
@@ -107,6 +106,7 @@ function KioskFlow({ token }: { token: string }) {
       {step === "review" && <ReviewScreen onHome={goHome} />}
       {step === "identify" && <IdentifyScreen onHome={goHome} />}
       {step === "pin" && <PinScreen shuffle={kiosk.shufflePinPad} onHome={goHome} />}
+      {step === "paying" && <PayingScreen />}
       {step === "done" && <DoneScreen seconds={kiosk.doneSeconds} onFinish={finish} />}
       {step === "error" && <ErrorScreen onHome={goHome} />}
     </div>
