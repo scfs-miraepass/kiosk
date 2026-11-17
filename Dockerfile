@@ -16,14 +16,17 @@ RUN apt-get update \
 COPY package.json yarn.lock .yarnrc ./
 COPY packages/miraepass-api-client/package.json packages/miraepass-api-client/package.json
 
+# deps와 prod-deps는 병렬로 빌드되는데 yarn 1 캐시는 동시 쓰기에 안전하지 않으므로
+# 캐시 마운트를 sharing=locked로 순서대로 사용하게 합니다.
+
 # ---------- 전체 의존성 (빌드·개발용) ----------
 FROM deps-base AS deps
-RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
+RUN --mount=type=cache,id=yarn-cache,target=/usr/local/share/.cache/yarn,sharing=locked \
     yarn install --frozen-lockfile --network-timeout 600000
 
 # ---------- 프로덕션 의존성 (실행용) ----------
 FROM deps-base AS prod-deps
-RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
+RUN --mount=type=cache,id=yarn-cache,target=/usr/local/share/.cache/yarn,sharing=locked \
     yarn install --frozen-lockfile --production --network-timeout 600000 \
     # yarn 1은 libc를 구분하지 않아 musl용 바이너리까지 받으므로 제거
     && rm -rf node_modules/@next/swc-*-musl node_modules/@img/*linuxmusl* \
