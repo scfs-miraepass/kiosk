@@ -47,11 +47,15 @@ function DrawerOverlay({
 function DrawerContent({
   className,
   children,
+  overlayClassName,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Content>) {
+}: React.ComponentProps<typeof DrawerPrimitive.Content> & {
+  /** 오버레이 스타일 덮어쓰기 (예: 저사양 기기에서 backdrop-blur 끄기) */
+  overlayClassName?: string
+}) {
   return (
     <DrawerPortal data-slot="drawer-portal">
-      <DrawerOverlay />
+      <DrawerOverlay className={overlayClassName} />
       <DrawerPrimitive.Content
         data-slot="drawer-content"
         className={cn(

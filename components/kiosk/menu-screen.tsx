@@ -11,6 +11,7 @@ import { activeCategoryAtom, addToCartAtom, cartCountAtom, cartTotalAtom, stepAt
 import { CartList } from "./cart-list";
 import { MenuCard } from "./menu-card";
 import { OptionDialog } from "./option-dialog";
+import { KIOSK_OVERLAY } from "./styles";
 
 export function MenuScreen({ menu, onHome }: { menu: CategoryDTO[]; onHome: () => void }) {
   const [activeId, setActiveId] = useAtom(activeCategoryAtom);
@@ -89,8 +90,8 @@ export function MenuScreen({ menu, onHome }: { menu: CategoryDTO[]; onHome: () =
         <CheckoutBar count={count} total={total} onNext={goReview} />
       </aside>
 
-      {/* 세로 태블릿·모바일: 하단 고정 바 + 드로어 */}
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-white/95 p-3 backdrop-blur lg:hidden">
+      {/* 세로 태블릿·모바일: 하단 고정 바 + 드로어 (스크롤할 때마다 흐림을 다시 계산하지 않도록 불투명 배경) */}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-white p-3 lg:hidden">
         <div className="flex gap-3">
           <button
             onClick={() => setCartOpen(true)}
@@ -112,7 +113,7 @@ export function MenuScreen({ menu, onHome }: { menu: CategoryDTO[]; onHome: () =
         </div>
       </div>
       <Drawer open={cartOpen} onOpenChange={setCartOpen}>
-        <DrawerContent className="max-h-[85dvh] bg-slate-50">
+        <DrawerContent className="max-h-[85dvh] bg-slate-50" overlayClassName={KIOSK_OVERLAY}>
           <DrawerTitle className="px-5 pt-2 text-2xl font-extrabold">주문 목록</DrawerTitle>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
             <CartList />
