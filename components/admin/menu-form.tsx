@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api, ClientApiError } from "@/lib/fetcher";
 import { qk } from "@/lib/query-keys";
+import { resizeImageForUpload } from "@/lib/resize-image";
 import type { CategoryDTO, MenuItemDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -102,9 +103,10 @@ function MenuForm({
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((p) => ({ ...p, [k]: v }));
 
   const upload = useMutation({
-    mutationFn: (file: File) => {
+    mutationFn: async (file: File) => {
       const fd = new FormData();
-      fd.append("file", file);
+      // 키오스크(라즈베리파이)의 이미지 디코딩 부담을 줄이려고 올리기 전에 줄인다
+      fd.append("file", await resizeImageForUpload(file));
       return api<{ url: string }>("/api/admin/upload", { method: "POST", body: fd });
     },
     onSuccess: ({ url }) => set("imageUrl", url),
