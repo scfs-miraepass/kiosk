@@ -110,7 +110,7 @@ function OptionForm({
                     key={o.id}
                     onClick={() => toggle(g, o.id)}
                     className={cn(
-                      "relative flex min-h-16 flex-col items-center justify-center rounded-2xl border-2 bg-white px-3 py-2 text-center transition active:scale-95",
+                      "relative flex min-h-16 flex-col items-center justify-center rounded-2xl border-2 bg-white px-3 py-2 text-center transition-transform duration-100 active:scale-95",
                       on ? "border-primary bg-primary/5 text-primary" : "border-transparent shadow-sm",
                     )}
                   >

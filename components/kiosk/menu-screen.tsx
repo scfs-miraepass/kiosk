@@ -51,7 +51,7 @@ export function MenuScreen({ menu, onHome }: { menu: CategoryDTO[]; onHome: () =
                 key={c.id}
                 onClick={() => setActiveId(c.id)}
                 className={cn(
-                  "flex shrink-0 items-center gap-2 rounded-2xl px-4 py-3 text-lg font-bold transition active:scale-95 lg:flex-col lg:gap-1 lg:px-2 lg:py-4",
+                  "flex shrink-0 items-center gap-2 rounded-2xl px-4 py-3 text-lg font-bold transition-transform duration-100 active:scale-95 lg:flex-col lg:gap-1 lg:px-2 lg:py-4",
                   on ? "bg-primary text-primary-foreground shadow-md shadow-primary/30" : "bg-slate-100 text-slate-600",
                 )}
               >
