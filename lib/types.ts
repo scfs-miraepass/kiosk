@@ -172,6 +172,8 @@ export type ApiErrorCode =
   | "INVALID_TRANSITION"
   | "REFUND_FAILED"
   | "UNAUTHORIZED"
+  /** 키오스크 기기 토큰이 없거나 서버 토큰과 다름 (키오스크는 저장된 토큰을 지우고 등록 화면으로) */
+  | "KIOSK_UNREGISTERED"
   | "FORBIDDEN"
   | "INVALID_CREDENTIALS"
   | "INVALID_PIN"

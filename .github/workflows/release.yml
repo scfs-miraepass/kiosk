@@ -22,7 +22,9 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
-    if: ${{ !inputs.manual_version }}
+    # rebase-dev job이 봇으로 dev에 강제 푸시한 경우에는 새 사전 릴리스를 만들지 않습니다.
+    # (semantic-release·수동 릴리스의 봇 푸시는 강제 푸시가 아니므로 여기에 걸리지 않습니다.)
+    if: ${{ !inputs.manual_version && !(github.ref == 'refs/heads/dev' && github.event.forced && endsWith(github.actor, '[bot]')) }}
     outputs:
       new_version: ${{ steps.extract.outputs.NEW_VERSION }}
     steps:
@@ -85,6 +87,7 @@ jobs:
     if: ${{ inputs.manual_version }}
     outputs:
       version: ${{ inputs.manual_version }}
+      created: ${{ steps.release.outputs.created }}
     steps:
       # 브랜치 규칙을 우회할 수 있는 GitHub App 토큰으로 릴리스 커밋을 푸시합니다.
       - name: Generate release token
@@ -139,6 +142,46 @@ jobs:
           PRERELEASE=""
           case "$MANUAL_VERSION" in *-*) PRERELEASE="--prerelease" ;; esac
           gh release create "v$MANUAL_VERSION" --verify-tag --title "v$MANUAL_VERSION" --notes-file release-notes.md $PRERELEASE
+
+  # master에 버전 커밋이 올라오면(semantic-release, 수동 릴리스 모두) dev를 master 위로 rebase합니다.
+  rebase-dev:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    needs: [semantic-release, manual-release]
+    if: ${{ always() && github.ref == 'refs/heads/master' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.manual-release.outputs.created == 'true' || needs.semantic-release.outputs.new_version) }}
+    steps:
+      # dev 브랜치 규칙을 우회해 강제 푸시할 수 있도록 GitHub App 토큰을 사용합니다.
+      - name: Generate release token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      # rebase로 다시 쓰이는 커밋의 committer를 App 봇 계정으로 표시합니다.
+      - name: Get release bot identity
+        id: bot
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BOT_NAME: ${{ steps.app-token.outputs.app-slug }}[bot]
+        run: |
+          BOT_ID=$(gh api "/users/$BOT_NAME" --jq .id)
+          echo "name=$BOT_NAME" >> "$GITHUB_OUTPUT"
+          echo "email=$BOT_ID+$BOT_NAME@users.noreply.github.com" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      # 원래 커밋 작성자(author)는 유지되고 committer만 봇으로 바뀝니다.
+      - name: Rebase dev onto master
+        env:
+          GIT_COMMITTER_NAME: ${{ steps.bot.outputs.name }}
+          GIT_COMMITTER_EMAIL: ${{ steps.bot.outputs.email }}
+        run: bash .github/scripts/rebase.sh dev master
 
   docker-build:
     runs-on: ubuntu-latest

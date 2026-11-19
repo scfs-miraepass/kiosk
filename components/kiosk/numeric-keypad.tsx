@@ -34,7 +34,7 @@ export function NumericKeypad({
 
   const keys = [...digits.slice(0, 9), "clear", digits[9], "del"];
   const base =
-    "flex h-16 items-center justify-center rounded-2xl text-3xl font-semibold transition active:scale-95 md:h-20";
+    "flex h-16 items-center justify-center rounded-2xl text-3xl font-semibold transition-transform duration-100 active:scale-95 md:h-20";
 
   return (
     <div className={cn("grid grid-cols-3 gap-2.5 md:gap-3", className)}>

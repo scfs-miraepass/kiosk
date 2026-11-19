@@ -40,7 +40,10 @@ yarn dev                 # http://localhost:3000
 | 학생 | 1101, 1215, 2307, 3412, 3101, 3105 | 키오스크 비밀번호 `123456`. 3101은 잔액 0P, 3105는 비밀번호 미설정 |
 | 교사 | 4001, 4002 | 키오스크 비밀번호 `123456` |
 
-키오스크를 처음 열면 기기 토큰(`KIOSK_DEVICE_TOKEN`)을 입력합니다.
+키오스크를 처음 열면 기기 토큰(`KIOSK_DEVICE_TOKEN`)을 입력합니다. 입력한 토큰은 그 기기의 브라우저에 저장됩니다.
+
+- **토큰을 바꿨을 때**: 서버의 `KIOSK_DEVICE_TOKEN`을 바꾸고 재시작하면, 키오스크가 켜질 때나 서버에 다시 연결될 때 토큰을 확인해서 맞지 않으면 저장된 토큰을 지우고 등록 화면을 띄웁니다. 새 토큰만 입력하면 됩니다.
+- **직접 바꾸기**: 메뉴 화면 왼쪽 위 로고(영업 종료 화면은 가운데 달 아이콘)를 5초 동안 누르면 기기 토큰 변경 화면이 열립니다. 새 토큰이 서버에서 확인돼야 바뀌므로, 취소하거나 틀린 토큰을 넣으면 기존 토큰을 그대로 씁니다. 1분 동안 입력이 없으면 주문 화면으로 돌아갑니다.
 
 ### 운영 배포
 
@@ -53,6 +56,28 @@ yarn start               # NODE_ENV=production, PORT 기본 3000
 - 브라우저의 키오스크 모드나 전체화면, 또는 홈 화면에 추가해서 사용하는 것을 권장합니다.
 - `data/` 폴더(DB, 업로드한 메뉴 이미지)는 꼭 백업하세요.
 - 로그인 쿠키의 `Secure`는 HTTPS로 접속했을 때만 자동으로 붙습니다(리버스 프록시의 `X-Forwarded-Proto` 포함). 그래서 `http://서버IP` 로 접속하는 태블릿에서도 로그인이 유지됩니다.
+
+### 라즈베리파이 키오스크 (Raspberry Pi 4B + Chromium)
+
+키오스크 화면은 라즈베리파이 4B에서도 끊기지 않도록 다음 원칙으로 만들었습니다(`components/kiosk`).
+
+- **배경 흐림(`backdrop-filter`)을 쓰지 않습니다.** 뒤 화면이 바뀔 때마다 흐림을 매 프레임 다시 계산해서 Pi GPU에서 가장 크게 끊기던 원인이었습니다. 옵션 창·장바구니 드로어는 반투명 단색으로만 어둡게 합니다(`components/kiosk/styles.ts`).
+- **계속 움직이는 효과는 CSS `transform`·`opacity`만 씁니다.** JS로 매 프레임 그리는 효과(MagicCard, BorderBeam, BlurFade, NumberTicker, ShimmerButton, motion)는 키오스크에서 쓰지 않습니다. 애니메이션은 `app/globals.css`의 `.kiosk-*` 클래스에 있습니다.
+- 메뉴 이미지는 관리자 화면에서 올릴 때 긴 변 800px WebP로 줄여서 저장합니다(`lib/resize-image.ts`).
+
+Chromium은 GPU 가속을 켜고 실행하세요. (Raspberry Pi OS Bookworm은 `chromium-browser`, 이후 버전은 `chromium`)
+
+```bash
+chromium-browser --kiosk --noerrdialogs --disable-infobars --no-first-run \
+  --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy \
+  --disable-pinch --overscroll-history-navigation=0 \
+  --disable-features=Translate --check-for-update-interval=31536000 \
+  http://<서버IP>:3000/kiosk
+```
+
+- `chrome://gpu`에서 *Compositing*, *Rasterization*이 `Hardware accelerated`인지 확인하세요. `Software only`면 `/boot/firmware/config.txt`에 `dtoverlay=vc4-kms-v3d`가 켜져 있는지 확인합니다.
+- 화면 해상도는 1920×1080 이하를 권장합니다. 4K 모니터라도 출력 해상도를 1080p로 낮추세요. Pi 4B GPU에서 4K 합성은 버거워서 끊깁니다.
+- 가능하면 서버(`yarn start` 또는 Docker)는 다른 기기에서 실행하고, Pi에서는 브라우저만 실행하세요.
 
 ## 환경 변수
 
