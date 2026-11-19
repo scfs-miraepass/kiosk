@@ -4,6 +4,7 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { ShoppingBag } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Drawer, DrawerContent, DrawerTitle } from "@/components/ui/drawer";
+import { useLongPress } from "@/hooks/use-long-press";
 import { formatPoint } from "@/lib/format";
 import type { CategoryDTO, MenuItemDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -12,7 +13,16 @@ import { CartList } from "./cart-list";
 import { MenuCard } from "./menu-card";
 import { OptionDialog } from "./option-dialog";
 
-export function MenuScreen({ menu, onHome }: { menu: CategoryDTO[]; onHome: () => void }) {
+export function MenuScreen({
+  menu,
+  onHome,
+  onLogoLongPress,
+}: {
+  menu: CategoryDTO[];
+  onHome: () => void;
+  /** 직원용 숨은 동작: 로고를 5초 동안 누르면 (짧게 누르면 처음으로) */
+  onLogoLongPress: () => void;
+}) {
   const [activeId, setActiveId] = useAtom(activeCategoryAtom);
   const setStep = useSetAtom(stepAtom);
   const addToCart = useSetAtom(addToCartAtom);
@@ -20,6 +30,7 @@ export function MenuScreen({ menu, onHome }: { menu: CategoryDTO[]; onHome: () =
   const total = useAtomValue(cartTotalAtom);
   const [selected, setSelected] = useState<{ item: MenuItemDTO; emoji: string } | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
+  const logoLongPress = useLongPress(onLogoLongPress);
 
   const categories = useMemo(() => menu.filter((c) => c.items.length > 0), [menu]);
   const active = categories.find((c) => c.id === activeId) ?? categories[0];
@@ -34,7 +45,7 @@ export function MenuScreen({ menu, onHome }: { menu: CategoryDTO[]; onHome: () =
       {/* 카테고리: 세로(가로 태블릿) / 가로 스크롤(세로 태블릿·모바일) */}
       <nav className="flex shrink-0 flex-col bg-white lg:h-dvh lg:border-r">
         <div className="flex items-center justify-between gap-3 px-4 pt-4 lg:flex-col lg:px-3 lg:pt-6">
-          <button onClick={onHome} className="flex items-center gap-2" aria-label="처음으로">
+          <button {...logoLongPress} onClick={onHome} className="flex touch-none items-center gap-2" aria-label="처음으로">
             <img src="/favicon.svg" alt="" className="h-8 lg:h-10" />
             <span className="text-lg font-extrabold lg:hidden">미래카페</span>
           </button>

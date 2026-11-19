@@ -74,6 +74,7 @@ export function KioskApp() {
 
   if (!mounted) return <FullscreenLoader />;
   if (!token) return <KioskSetup reason={setup} onRegistered={registered} />;
+  if (setup === "manual") return <KioskSetup reason={setup} onRegistered={registered} onCancel={() => setSetup(null)} />;
   return <KioskFlow token={token} />;
 }
 
@@ -87,6 +88,9 @@ function KioskFlow({ token }: { token: string }) {
   const menu = useMenu();
   const status = useStoreStatus();
   const settings = usePublicSettings();
+  const setTokenSetup = useSetAtom(tokenSetupAtom);
+  // 직원용 숨은 동작: 로고(영업 종료 화면은 달 아이콘)를 5초 동안 누르면 기기 토큰 변경 화면
+  const openTokenSetup = useCallback(() => setTokenSetup("manual"), [setTokenSetup]);
 
   // 켜질 때 저장된 토큰이 아직 유효한지 확인 (손님이 주문을 다 한 뒤에야 실패하지 않도록)
   useEffect(() => {
@@ -142,12 +146,12 @@ function KioskFlow({ token }: { token: string }) {
       </div>
     );
   }
-  if (closed && !locked) return <ClosedScreen status={status.data!} />;
+  if (closed && !locked) return <ClosedScreen status={status.data!} onLongPress={openTokenSetup} />;
 
   return (
     <div className="kiosk-surface h-dvh overflow-hidden">
       {step === "attract" && <AttractScreen menu={menu.data} onStart={() => setStep("menu")} />}
-      {step === "menu" && <MenuScreen menu={menu.data} onHome={goHome} />}
+      {step === "menu" && <MenuScreen menu={menu.data} onHome={goHome} onLogoLongPress={openTokenSetup} />}
       {step === "review" && <ReviewScreen onHome={goHome} />}
       {step === "identify" && <IdentifyScreen onHome={goHome} />}
       {step === "pin" && <PinScreen shuffle={kiosk.shufflePinPad} onHome={goHome} />}
