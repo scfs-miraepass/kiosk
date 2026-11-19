@@ -20,7 +20,7 @@ export function MenuThumb({
       )}
     >
       {imageUrl ? (
-        <img src={imageUrl} alt={name} className="size-full object-cover" draggable={false} />
+        <img src={imageUrl} alt={name} className="size-full object-cover" draggable={false} decoding="async" />
       ) : (
         <span className="tossface text-[clamp(2.5rem,6vw,4rem)] leading-none" aria-hidden>
           {emoji}

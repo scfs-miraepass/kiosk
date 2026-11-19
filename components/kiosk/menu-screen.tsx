@@ -2,7 +2,7 @@
 
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { ShoppingBag } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Drawer, DrawerContent, DrawerTitle } from "@/components/ui/drawer";
 import { formatPoint } from "@/lib/format";
 import type { CategoryDTO, MenuItemDTO } from "@/lib/types";
@@ -21,6 +21,8 @@ export function MenuScreen({ menu, onHome }: { menu: CategoryDTO[]; onHome: () =
   const total = useAtomValue(cartTotalAtom);
   const [selected, setSelected] = useState<{ item: MenuItemDTO; emoji: string } | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
+  // MenuCard(memo)가 장바구니 변경 때마다 다시 렌더링되지 않도록 고정된 콜백
+  const select = useCallback((item: MenuItemDTO, emoji: string) => setSelected({ item, emoji }), []);
 
   const categories = useMemo(() => menu.filter((c) => c.items.length > 0), [menu]);
   const active = categories.find((c) => c.id === activeId) ?? categories[0];
@@ -71,7 +73,7 @@ export function MenuScreen({ menu, onHome }: { menu: CategoryDTO[]; onHome: () =
             </h2>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:gap-4 xl:grid-cols-4">
               {active.items.map((item) => (
-                <MenuCard key={item.id} item={item} emoji={active.emoji} onSelect={() => setSelected({ item, emoji: active.emoji })} />
+                <MenuCard key={item.id} item={item} emoji={active.emoji} onSelect={select} />
               ))}
             </div>
           </>
