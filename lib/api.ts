@@ -64,7 +64,8 @@ export async function requireUser(role: SessionUser["role"] = "staff"): Promise<
 export function requireKiosk(req: Request) {
   const expected = process.env.KIOSK_DEVICE_TOKEN;
   const token = req.headers.get("x-kiosk-token");
-  if (!expected || token !== expected) throw new ApiError("UNAUTHORIZED", "등록되지 않은 키오스크예요", 401);
+  // 비밀번호 오류(INVALID_PIN)도 401이라, 키오스크가 토큰 문제만 구분할 수 있도록 전용 코드를 쓴다
+  if (!expected || token !== expected) throw new ApiError("KIOSK_UNREGISTERED", "등록되지 않은 키오스크예요", 401);
   return token;
 }
 

@@ -44,6 +44,12 @@ export const kioskTokenAtom = atomWithStorage<string | null>(KIOSK_TOKEN_KEY, nu
 }, { getOnInit: true });
 
 export const stepAtom = atom<KioskStep>("attract");
+/**
+ * 기기 토큰 등록 화면을 연 이유.
+ * manual: 직원이 숨은 동작(로고 길게 누르기)으로 열었다. 기존 토큰은 새 토큰이 확인될 때까지 그대로 둔다.
+ * invalid: 서버가 저장된 토큰을 거부해서(토큰 변경) 지웠다.
+ */
+export const tokenSetupAtom = atom<null | "manual" | "invalid">(null);
 export const cartAtom = atom<CartLine[]>([]);
 export const activeCategoryAtom = atom<number | null>(null);
 export const customerAtom = atom<SelectedCustomer | null>(null);

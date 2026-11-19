@@ -144,7 +144,11 @@ function SettingsForm({ initial, kioskToken }: { initial: AppSettings; kioskToke
                 <Copy />
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">키오스크 기기에서 /kiosk를 처음 열면 이 토큰을 입력해요. 바꾸려면 서버의 KIOSK_DEVICE_TOKEN을 수정하세요.</p>
+            <p className="text-xs text-muted-foreground">
+              키오스크 기기에서 /kiosk를 처음 열면 이 토큰을 입력해요. 바꾸려면 서버의 KIOSK_DEVICE_TOKEN을 수정하고 서버를 재시작하세요.
+              등록된 키오스크는 토큰이 맞지 않으면 자동으로 등록 화면으로 바뀌어요. 키오스크 메뉴 화면 왼쪽 위 로고(영업 종료 화면은 달 아이콘)를
+              5초 동안 누르면 토큰을 직접 바꿀 수 있어요.
+            </p>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
