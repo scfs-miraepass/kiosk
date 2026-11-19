@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# 미래카페 키오스크 세션: openbox autostart에서 실행한다 (install.sh가 등록).
+#  1. 화면 보호기·절전 끄기
+#  2. 터치 점검 제스처 감시 (화면 모서리 길게 누르기 → 점검 패널)
+#  3. Chromium 키오스크 반복 실행 (꺼지거나 점검 패널에서 '다시 시작'하면 2초 뒤 다시 뜬다)
+set -u
+
+CONF="${MIRAEPASS_KIOSK_CONF:-$HOME/.config/miraepass-kiosk/kiosk.conf}"
+DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+
+KIOSK_URL="http://127.0.0.1:3000/kiosk"
+CHROMIUM_PROFILE="$HOME/.config/chromium-kiosk"
+CHROMIUM_EXTRA_FLAGS=""
+# shellcheck source=/dev/null
+[ -f "$CONF" ] && . "$CONF"
+
+xset s off -dpms s noblank 2>/dev/null || true
+
+# 점검 패널 제스처 감시. 죽어도 다시 실행한다
+( while true; do python3 "$DIR/maint/touch_gesture.py"; sleep 3; done ) &
+
+CHROME="$(command -v chromium-browser || command -v chromium || true)"
+if [ -z "$CHROME" ]; then
+  echo "Chromium을 찾을 수 없어요 (chromium-browser / chromium)" >&2
+  # 점검 패널은 계속 쓸 수 있도록 세션은 유지한다
+  wait
+fi
+
+mkdir -p "$CHROMIUM_PROFILE"
+while true; do
+  # 비정상 종료 뒤 '페이지를 복원할까요?' 풍선이 뜨지 않도록 종료 상태를 정상으로 표시
+  PREFS="$CHROMIUM_PROFILE/Default/Preferences"
+  [ -f "$PREFS" ] && sed -i 's/"exited_cleanly":false/"exited_cleanly":true/; s/"exit_type":"[^"]*"/"exit_type":"Normal"/' "$PREFS"
+
+  # CHROMIUM_EXTRA_FLAGS는 여러 옵션을 공백으로 나눠 넘기려고 일부러 따옴표 없이 쓴다
+  # shellcheck disable=SC2086
+  "$CHROME" --kiosk --noerrdialogs --disable-infobars --no-first-run \
+    --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy \
+    --disable-pinch --overscroll-history-navigation=0 \
+    --disable-features=Translate --check-for-update-interval=31536000 \
+    --user-data-dir="$CHROMIUM_PROFILE" --remote-debugging-port=9222 \
+    $CHROMIUM_EXTRA_FLAGS "$KIOSK_URL"
+  sleep 2
+done

@@ -1,0 +1,22 @@
+# 미래카페 키오스크 설정 (~/.config/miraepass-kiosk/kiosk.conf)
+# install.sh가 만들고, 점검 패널의 '키오스크 주소 변경'이 KIOSK_URL을 고친다. 셸에서 source할 수 있는 형식이다.
+
+# 키오스크 화면 주소
+KIOSK_URL=http://192.168.0.10:3000/kiosk
+
+# 점검 패널 여는 제스처: 이 모서리를 한 손가락으로 MAINT_HOLD_SECONDS초 동안 누르고 있기
+# top-left | top-right | bottom-left | bottom-right
+# 터치 좌표가 화면과 회전돼 있으면 `python3 /opt/miraepass-kiosk/maint/touch_gesture.py --debug`로 확인해서 맞춘다
+MAINT_CORNER=top-right
+MAINT_CORNER_SIZE=0.08
+MAINT_HOLD_SECONDS=5
+
+# 점검 패널 PIN의 sha256 (install.sh --reset-pin으로 바꾼다). 비어 있으면 패널이 열리지 않는다
+MAINT_PIN_SHA256=
+
+# 입력이 없으면 패널을 닫는 시간(초)
+MAINT_IDLE_SECONDS=120
+
+# Chromium 프로필 경로와 추가 옵션
+CHROMIUM_PROFILE=$HOME/.config/chromium-kiosk
+CHROMIUM_EXTRA_FLAGS=
