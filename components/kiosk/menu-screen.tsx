@@ -30,10 +30,10 @@ export function MenuScreen({
   const total = useAtomValue(cartTotalAtom);
   const [selected, setSelected] = useState<{ item: MenuItemDTO; emoji: string } | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
-  const logoLongPress = useLongPress(onLogoLongPress);
 
   const categories = useMemo(() => menu.filter((c) => c.items.length > 0), [menu]);
   const active = categories.find((c) => c.id === activeId) ?? categories[0];
+  const logoLongPress = useLongPress(onLogoLongPress);
 
   const goReview = () => {
     setCartOpen(false);
