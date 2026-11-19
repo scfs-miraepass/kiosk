@@ -43,7 +43,7 @@ if (lastVersion && !semver.gt(version, lastVersion)) {
   fail(`${version}은(는) 마지막 릴리스 ${lastVersion}보다 높아야 합니다.`);
 }
 
-execFileSync("sh", ["npm", "pkg", "set", `"version=${version}"`], { stdio: "inherit" });
+execFileSync("npm", ["pkg", "set", `"version=${version}"`], { stdio: "inherit" });
 
 git("add", "package.json");
 git("commit", "-m", `chore(release): ${version} [skip ci]`);
