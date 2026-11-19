@@ -8,3 +8,4 @@ next-env.d.ts
 data/*.db*
 .DS_Store
 dist
+__pycache__/
