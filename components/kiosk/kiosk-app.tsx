@@ -7,9 +7,18 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useMenu, usePublicSettings, useStoreStatus } from "@/hooks/queries";
 import { useIdleTimer } from "@/hooks/use-idle-timer";
 import { useSocket } from "@/hooks/use-socket";
+import { api, KIOSK_UNREGISTERED_EVENT } from "@/lib/fetcher";
 import { qk } from "@/lib/query-keys";
 import type { MenuItemDTO } from "@/lib/types";
-import { kioskTokenAtom, paymentPendingAtom, resetKioskAtom, stepAtom, syncCartWithMenuAtom, type KioskStep } from "@/store/kiosk";
+import {
+  kioskTokenAtom,
+  paymentPendingAtom,
+  resetKioskAtom,
+  stepAtom,
+  syncCartWithMenuAtom,
+  tokenSetupAtom,
+  type KioskStep,
+} from "@/store/kiosk";
 import { AttractScreen } from "./attract-screen";
 import { ClosedScreen } from "./closed-screen";
 import { DoneScreen } from "./done-screen";
@@ -32,11 +41,39 @@ const useMounted = () =>
     () => false,
   );
 
+/** 저장된 토큰이 아직 유효한지 서버에 확인. 거부되면 fetcher가 KIOSK_UNREGISTERED_EVENT를 보낸다 (네트워크 오류는 무시) */
+const verifyToken = () => api("/api/kiosk/verify", { method: "POST", kiosk: true }).catch(() => {});
+
 export function KioskApp() {
   const mounted = useMounted();
-  const token = useAtomValue(kioskTokenAtom);
+  const [token, setToken] = useAtom(kioskTokenAtom);
+  const [setup, setSetup] = useAtom(tokenSetupAtom);
+  const reset = useSetAtom(resetKioskAtom);
+
+  // 서버가 저장된 토큰을 거부하면(서버 토큰이 바뀜) 토큰을 지우고 등록 화면으로 보낸다.
+  // 키오스크 모드에서는 주소창·개발자 도구가 없어 저장된 토큰을 지울 방법이 없기 때문.
+  // 결제 요청이 거부된 경우에도 서버가 토큰부터 확인하므로 포인트는 차감되지 않았다.
+  useEffect(() => {
+    const onUnregistered = () => {
+      setToken(null);
+      setSetup("invalid");
+      reset("attract");
+    };
+    window.addEventListener(KIOSK_UNREGISTERED_EVENT, onUnregistered);
+    return () => window.removeEventListener(KIOSK_UNREGISTERED_EVENT, onUnregistered);
+  }, [setToken, setSetup, reset]);
+
+  const registered = useCallback(
+    (next: string) => {
+      setToken(next);
+      setSetup(null);
+      reset("attract");
+    },
+    [setToken, setSetup, reset],
+  );
+
   if (!mounted) return <FullscreenLoader />;
-  if (!token) return <KioskSetup />;
+  if (!token) return <KioskSetup reason={setup} onRegistered={registered} />;
   return <KioskFlow token={token} />;
 }
 
@@ -51,6 +88,11 @@ function KioskFlow({ token }: { token: string }) {
   const status = useStoreStatus();
   const settings = usePublicSettings();
 
+  // 켜질 때 저장된 토큰이 아직 유효한지 확인 (손님이 주문을 다 한 뒤에야 실패하지 않도록)
+  useEffect(() => {
+    verifyToken();
+  }, [token]);
+
   useSocket(
     { role: "kiosk", kioskToken: token },
     {
@@ -61,6 +103,8 @@ function KioskFlow({ token }: { token: string }) {
     () => {
       qc.invalidateQueries({ queryKey: qk.menu });
       qc.invalidateQueries({ queryKey: qk.storeStatus });
+      // 서버 토큰을 바꾸려면 서버를 재시작해야 하므로, 재연결될 때 토큰을 다시 확인한다
+      verifyToken();
     },
   );
 
