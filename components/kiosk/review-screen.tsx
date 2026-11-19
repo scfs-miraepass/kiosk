@@ -2,7 +2,6 @@
 
 import { useAtomValue, useSetAtom } from "jotai";
 import { useEffect } from "react";
-import { ShimmerButton } from "@/components/ui/shimmer-button";
 import { cartCountAtom, cartTotalAtom, stepAtom } from "@/store/kiosk";
 import { CartList } from "./cart-list";
 import { StepHeader } from "./step-header";
@@ -38,15 +37,14 @@ export function ReviewScreen({ onHome }: { onHome: () => void }) {
             >
               메뉴 추가
             </button>
-            <ShimmerButton
+            {/* ShimmerButton(blur 필터 + conic-gradient 회전)은 매 프레임 repaint라 transform만 쓰는 빛 효과로 대체 */}
+            <button
               onClick={() => setStep("identify")}
-              background="var(--color-primary)"
-              borderRadius="1rem"
-              shimmerColor="#bfdbfe"
-              className="h-18 text-2xl font-bold md:h-20"
+              className="relative isolate h-18 overflow-hidden rounded-2xl bg-primary text-2xl font-bold text-primary-foreground shadow-lg shadow-primary/30 active:scale-[0.98] md:h-20"
             >
+              <span aria-hidden className="kiosk-shine" />
               결제하기
-            </ShimmerButton>
+            </button>
           </div>
         </div>
       </div>

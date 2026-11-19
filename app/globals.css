@@ -265,6 +265,64 @@
   50% { opacity: 0.45; }
 }
 
+/*
+ * 키오스크 애니메이션 (라즈베리파이 4B 기준)
+ * transform·opacity만 움직여서 메인 스레드·repaint 없이 GPU 합성만으로 돌아가게 한다.
+ * filter: blur, backdrop-filter, box-shadow, background-position 애니메이션은 매 프레임 다시 그려야 해서 쓰지 않는다.
+ */
+.kiosk-rise {
+  animation: kiosk-rise 0.35s cubic-bezier(0.25, 1, 0.5, 1) both;
+  animation-delay: var(--delay, 0s);
+}
+@keyframes kiosk-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+
+.kiosk-pop {
+  animation: kiosk-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation-delay: var(--delay, 0s);
+}
+@keyframes kiosk-pop {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: none; }
+}
+
+.kiosk-word {
+  animation: kiosk-word 0.3s ease-out both;
+}
+@keyframes kiosk-word {
+  from { opacity: 0; transform: translateY(-40%); }
+  to { opacity: 1; transform: none; }
+}
+
+.kiosk-shake {
+  animation: kiosk-shake 0.4s ease-in-out;
+}
+@keyframes kiosk-shake {
+  0%, 100% { transform: none; }
+  20% { transform: translateX(-14px); }
+  40% { transform: translateX(14px); }
+  60% { transform: translateX(-10px); }
+  80% { transform: translateX(10px); }
+}
+
+/* 결제하기 버튼의 빛 지나가는 효과: 미리 그린 그라디언트 막대를 transform으로만 이동 */
+.kiosk-shine {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  pointer-events: none;
+  background: linear-gradient(100deg, transparent, rgb(255 255 255 / 0.35), transparent);
+  transform: translateX(-120%);
+  animation: kiosk-shine 3.2s ease-in-out 0.8s infinite;
+  will-change: transform;
+}
+@keyframes kiosk-shine {
+  0% { transform: translateX(-120%); }
+  45%, 100% { transform: translateX(300%); }
+}
+
 /* 키오스크: 터치 기기 최적화 */
 .kiosk-surface {
   user-select: none;
