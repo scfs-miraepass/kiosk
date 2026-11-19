@@ -2,7 +2,7 @@
 
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { ShoppingBag } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Drawer, DrawerContent, DrawerTitle } from "@/components/ui/drawer";
 import { formatPoint } from "@/lib/format";
 import type { CategoryDTO, MenuItemDTO } from "@/lib/types";
@@ -11,6 +11,7 @@ import { activeCategoryAtom, addToCartAtom, cartCountAtom, cartTotalAtom, stepAt
 import { CartList } from "./cart-list";
 import { MenuCard } from "./menu-card";
 import { OptionDialog } from "./option-dialog";
+import { KIOSK_OVERLAY } from "./styles";
 
 export function MenuScreen({ menu, onHome }: { menu: CategoryDTO[]; onHome: () => void }) {
   const [activeId, setActiveId] = useAtom(activeCategoryAtom);
@@ -20,6 +21,8 @@ export function MenuScreen({ menu, onHome }: { menu: CategoryDTO[]; onHome: () =
   const total = useAtomValue(cartTotalAtom);
   const [selected, setSelected] = useState<{ item: MenuItemDTO; emoji: string } | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
+  // MenuCard(memo)가 장바구니 변경 때마다 다시 렌더링되지 않도록 고정된 콜백
+  const select = useCallback((item: MenuItemDTO, emoji: string) => setSelected({ item, emoji }), []);
 
   const categories = useMemo(() => menu.filter((c) => c.items.length > 0), [menu]);
   const active = categories.find((c) => c.id === activeId) ?? categories[0];
@@ -48,7 +51,7 @@ export function MenuScreen({ menu, onHome }: { menu: CategoryDTO[]; onHome: () =
                 key={c.id}
                 onClick={() => setActiveId(c.id)}
                 className={cn(
-                  "flex shrink-0 items-center gap-2 rounded-2xl px-4 py-3 text-lg font-bold transition active:scale-95 lg:flex-col lg:gap-1 lg:px-2 lg:py-4",
+                  "flex shrink-0 items-center gap-2 rounded-2xl px-4 py-3 text-lg font-bold transition-transform duration-100 active:scale-95 lg:flex-col lg:gap-1 lg:px-2 lg:py-4",
                   on ? "bg-primary text-primary-foreground shadow-md shadow-primary/30" : "bg-slate-100 text-slate-600",
                 )}
               >
@@ -70,7 +73,7 @@ export function MenuScreen({ menu, onHome }: { menu: CategoryDTO[]; onHome: () =
             </h2>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:gap-4 xl:grid-cols-4">
               {active.items.map((item) => (
-                <MenuCard key={item.id} item={item} emoji={active.emoji} onSelect={() => setSelected({ item, emoji: active.emoji })} />
+                <MenuCard key={item.id} item={item} emoji={active.emoji} onSelect={select} />
               ))}
             </div>
           </>
@@ -89,8 +92,8 @@ export function MenuScreen({ menu, onHome }: { menu: CategoryDTO[]; onHome: () =
         <CheckoutBar count={count} total={total} onNext={goReview} />
       </aside>
 
-      {/* 세로 태블릿·모바일: 하단 고정 바 + 드로어 */}
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-white/95 p-3 backdrop-blur lg:hidden">
+      {/* 세로 태블릿·모바일: 하단 고정 바 + 드로어 (스크롤할 때마다 흐림을 다시 계산하지 않도록 불투명 배경) */}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-white p-3 lg:hidden">
         <div className="flex gap-3">
           <button
             onClick={() => setCartOpen(true)}
@@ -112,7 +115,7 @@ export function MenuScreen({ menu, onHome }: { menu: CategoryDTO[]; onHome: () =
         </div>
       </div>
       <Drawer open={cartOpen} onOpenChange={setCartOpen}>
-        <DrawerContent className="max-h-[85dvh] bg-slate-50">
+        <DrawerContent className="max-h-[85dvh] bg-slate-50" overlayClassName={KIOSK_OVERLAY}>
           <DrawerTitle className="px-5 pt-2 text-2xl font-extrabold">주문 목록</DrawerTitle>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
             <CartList />

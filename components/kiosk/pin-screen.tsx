@@ -2,7 +2,6 @@
 
 import { useAtomValue, useSetAtom } from "jotai";
 import { AlertTriangle, Loader2, LockKeyhole } from "lucide-react";
-import { motion } from "motion/react";
 import { useState } from "react";
 import { candidateHonorific, formatPoint } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -61,23 +60,18 @@ export function PinScreen({ shuffle, onHome }: { shuffle: boolean; onHome: () =>
             <p className="text-2xl font-bold">{candidateHonorific(customer)}</p>
             <p className="mt-1 text-lg text-muted-foreground">MIRAEPASS 키오스크 비밀번호 6자리를 입력해 주세요</p>
           </div>
-          <motion.div
-            key={error?.at ?? 0}
-            animate={error ? { x: [0, -14, 14, -10, 10, 0] } : undefined}
-            transition={{ duration: 0.4 }}
-            className="flex gap-3"
-            aria-label={`${pin.length}자리 입력됨`}
-          >
+          {/* key가 바뀌면 다시 마운트되면서 CSS 흔들림 애니메이션이 한 번 재생된다 (transform만 사용) */}
+          <div key={error?.at ?? 0} className={cn("flex gap-3", error && "kiosk-shake")} aria-label={`${pin.length}자리 입력됨`}>
             {Array.from({ length: LENGTH }).map((_, i) => (
               <span
                 key={i}
                 className={cn(
-                  "size-5 rounded-full transition-colors md:size-6",
+                  "size-5 rounded-full md:size-6",
                   i < pin.length ? "bg-primary" : error ? "bg-destructive/30" : "bg-slate-300",
                 )}
               />
             ))}
-          </motion.div>
+          </div>
 
           {/* 상태 줄: 높이를 미리 잡아 두어 안내가 바뀌어도 화면이 움직이지 않는다 */}
           <div className="flex min-h-11 items-center justify-center" role="status" aria-live="polite">

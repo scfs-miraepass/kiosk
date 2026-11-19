@@ -8,6 +8,7 @@ import { defaultOptionIds } from "@/lib/pricing";
 import type { MenuItemDTO, MenuOptionGroupDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { MenuThumb } from "./menu-thumb";
+import { KIOSK_OVERLAY } from "./styles";
 
 export function OptionDialog({
   item,
@@ -24,6 +25,7 @@ export function OptionDialog({
     <Dialog open={!!item} onOpenChange={(o) => !o && onClose()}>
       <DialogContent
         showCloseButton={false}
+        overlayClassName={KIOSK_OVERLAY}
         className="flex max-h-[92dvh] w-[calc(100%-1.5rem)] max-w-xl flex-col gap-0 overflow-hidden rounded-3xl p-0 sm:max-w-xl"
       >
         {item && <OptionForm key={item.id} item={item} emoji={emoji} onClose={onClose} onAdd={onAdd} />}
@@ -108,7 +110,7 @@ function OptionForm({
                     key={o.id}
                     onClick={() => toggle(g, o.id)}
                     className={cn(
-                      "relative flex min-h-16 flex-col items-center justify-center rounded-2xl border-2 bg-white px-3 py-2 text-center transition active:scale-95",
+                      "relative flex min-h-16 flex-col items-center justify-center rounded-2xl border-2 bg-white px-3 py-2 text-center transition-transform duration-100 active:scale-95",
                       on ? "border-primary bg-primary/5 text-primary" : "border-transparent shadow-sm",
                     )}
                   >

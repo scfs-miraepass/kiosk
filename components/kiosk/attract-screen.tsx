@@ -1,9 +1,8 @@
 "use client";
 
 import { Hand } from "lucide-react";
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { Marquee } from "@/components/ui/marquee";
-import { WordRotate } from "@/components/ui/word-rotate";
 import { formatPoint } from "@/lib/format";
 import type { CategoryDTO } from "@/lib/types";
 import { MenuThumb } from "./menu-thumb";
@@ -15,6 +14,7 @@ import { MenuThumb } from "./menu-thumb";
  * - 배경 점무늬는 SVG 요소 수천 개 + JS 애니메이션(DotPattern glow) 대신 CSS 그라디언트 한 장으로 그린다.
  * - 계속 움직이는 요소는 transform/opacity만 애니메이션해서 GPU 합성만 일어나게 한다
  *   (backdrop-blur, background-position 애니메이션처럼 매 프레임 repaint를 일으키는 효과는 쓰지 않는다).
+ * - 메뉴 이름 바꾸기도 motion(JS로 매 프레임 transform 계산) 대신 CSS 애니메이션(.kiosk-word)으로 한다.
  */
 export const AttractScreen = memo(function AttractScreen({ menu, onStart }: { menu: CategoryDTO[]; onStart: () => void }) {
   const { featured, words } = useMemo(() => {
@@ -37,7 +37,7 @@ export const AttractScreen = memo(function AttractScreen({ menu, onStart }: { me
         <p className="text-lg font-semibold text-primary md:text-2xl">순천미래과학고 교내 카페</p>
         <div className="flex flex-col items-center text-[2.5rem] leading-tight font-extrabold tracking-tight md:text-h1 md:font-extrabold">
           <span>오늘은</span>
-          <WordRotate words={words} duration={2600} className="text-primary" />
+          <RotatingWord words={words} interval={2600} />
           <span>어떠세요?</span>
         </div>
         <div className="mt-6 flex items-center gap-3 rounded-full bg-white px-8 py-4 shadow-lg ring-1 ring-blue-100">
@@ -66,3 +66,19 @@ export const AttractScreen = memo(function AttractScreen({ menu, onStart }: { me
     </button>
   );
 });
+
+/** 메뉴 이름을 돌아가며 보여준다. key가 바뀔 때마다 CSS 등장 애니메이션(transform·opacity)이 한 번 재생된다 */
+function RotatingWord({ words, interval }: { words: string[]; interval: number }) {
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setIndex((i) => (i + 1) % words.length), interval);
+    return () => clearInterval(t);
+  }, [words, interval]);
+  return (
+    <span className="block overflow-hidden py-2">
+      <span key={index} className="kiosk-word block text-primary">
+        {words[index % words.length]}
+      </span>
+    </span>
+  );
+}
