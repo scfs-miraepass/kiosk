@@ -52,6 +52,7 @@ yarn start               # NODE_ENV=production, PORT 기본 3000
 - 키오스크·직원 태블릿은 같은 네트워크에서 `http://<서버IP>:3000/kiosk`, `/staff`로 접속합니다.
 - 브라우저의 키오스크 모드나 전체화면, 또는 홈 화면에 추가해서 사용하는 것을 권장합니다.
 - `data/` 폴더(DB, 업로드한 메뉴 이미지)는 꼭 백업하세요.
+- 라즈베리파이 키오스크 기기 설정(Chromium 키오스크 자동 실행, 키보드 없이 터치로 Wi-Fi·명령어를 다루는 점검 패널)은 [`deploy/raspberry-pi`](deploy/raspberry-pi/README.md)를 참고하세요.
 - 로그인 쿠키의 `Secure`는 HTTPS로 접속했을 때만 자동으로 붙습니다(리버스 프록시의 `X-Forwarded-Proto` 포함). 그래서 `http://서버IP` 로 접속하는 태블릿에서도 로그인이 유지됩니다.
 
 ## 환경 변수
