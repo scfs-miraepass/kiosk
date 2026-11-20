@@ -412,11 +412,26 @@ OUTPUT="$(xrandr --query 2>/dev/null | awk '/ connected/{print $1; exit}')"
 [[ -n "${OUTPUT}" ]] || { echo "연결된 화면을 찾지 못했습니다 (DISPLAY=${DISPLAY})" >&2; exit 1; }
 xrandr --output "${OUTPUT}" --rotate "${ROTATE}" || exit 1
 
+# 터치 좌표 보정: 절대 좌표 포인터(터치스크린·펜)만 고른다. 마우스·터치패드는 건드리지 않는다.
+# 이름이 제각각인 USB 터치패널도 잡히도록 이름이 아니라 장치 속성으로 판단한다.
+# (다시 연결된 장치는 /etc/X11/xorg.conf.d/99-miraepass-touch-rotation.conf 가 같은 방향을 적용한다)
 if command -v xinput >/dev/null 2>&1; then
-  while IFS= read -r dev; do
+  for id in $(xinput list --id-only 2>/dev/null); do
+    props="$(xinput list-props "${id}" 2>/dev/null)" || continue
+    grep -q "Coordinate Transformation Matrix" <<<"${props}" || continue
+    name="$(xinput list --name-only "${id}" 2>/dev/null)"
+    [[ "${name}" == *XTEST* ]] && continue
+    if grep -q "^\s*libinput " <<<"${props}"; then
+      # libinput: 보정 행렬을 지원하는 장치 = 터치스크린·펜 (터치패드·마우스는 지원 안 함)
+      grep -q "libinput Calibration Matrix" <<<"${props}" || continue
+    elif ! grep -q "Evdev Axis Calibration" <<<"${props}"; then
+      # 그 밖의 드라이버: 이름으로 판단 (터치패드 제외)
+      grep -q -i -E 'touch|ft5x06|goodix|ilitek|egalax|eeti|wacom' <<<"${name}" || continue
+      grep -q -i 'touchpad' <<<"${name}" && continue
+    fi
     # shellcheck disable=SC2086
-    xinput set-prop "pointer:${dev}" "Coordinate Transformation Matrix" ${MATRIX} 2>/dev/null || true
-  done < <(xinput list --name-only 2>/dev/null | grep -i -E 'touch|ft5x06|goodix|ilitek|egalax|eeti|wacom|elan' || true)
+    xinput set-prop "${id}" "Coordinate Transformation Matrix" ${MATRIX} && echo "터치 보정: ${name}"
+  done
 fi
 ROTATE
 chmod 0755 /usr/local/bin/miraepass-kiosk-rotate
@@ -550,6 +565,9 @@ systemctl set-default multi-user.target >/dev/null
 systemctl disable getty@tty1.service >/dev/null 2>&1 || true
 systemctl enable miraepass-kiosk-control.service miraepass-kiosk.service
 systemctl restart miraepass-kiosk-control.service
+
+# 다시 연결된 터치 장치에도 저장된 화면 방향이 적용되도록 Xorg 설정을 맞춘다
+"${PYTHON_BIN}" /usr/local/bin/miraepass-kiosk-control.py touch-conf "${DISPLAY_ROTATE}" >/dev/null || warn "터치 회전 설정 파일을 쓰지 못했습니다"
 
 echo "==> 방화벽 $([[ "${FIREWALL}" == "1" ]] && echo "켜기 (들어오는 연결 차단, SSH가 켜져 있으면 SSH만 허용)" || echo "끄기")"
 # 규칙 생성은 로컬 서비스와 같은 코드를 쓴다. 이미 연결된 SSH 세션은 established 규칙으로 유지된다.

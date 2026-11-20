@@ -74,6 +74,8 @@ Chromium 플래그는 `/etc/default/miraepass-kiosk`의 `CHROMIUM_EXTRA_FLAGS`�
 - `miraepass-kiosk-control.service`: 관리자 모드가 호출하는 로컬 설정 API (`127.0.0.1:8765`에만 바인딩)
 - `miraepass-firewall.service` + `/etc/miraepass/firewall.nft`: nftables 전용 테이블(`inet miraepass_kiosk`)로 들어오는 연결 차단. 나가는 연결과 그 응답, loopback, IPv6 필수 ICMPv6/DHCPv6만 허용하고, SSH가 켜져 있으면 SSH 포트를 허용 (ufw·firewalld와 함께 써도 서로 덮어쓰지 않음)
 - `/usr/local/bin/miraepass-kiosk-rotate`: 화면·터치 회전 스크립트 (부팅 시와 관리자 모드에서 공통 사용)
+  - 터치 장치는 이름이 아니라 속성(절대 좌표 입력)으로 찾아서 마우스·터치패드는 건드리지 않습니다.
+  - 저장된 방향은 `/etc/X11/xorg.conf.d/99-miraepass-touch-rotation.conf`에도 기록돼, USB 터치가 다시 연결돼도 같은 방향이 적용됩니다.
 
 > 이전 이름(`scripts/pi-kiosk`, `miraepass-pi-control`)으로 설치한 기기는 새 스크립트로 다시 설치하면 서비스가 자동으로 교체되고 관리자 PIN도 이어집니다.
 - Chromium·Chrome 정책(`/etc/chromium/policies/managed`, `/etc/chromium-browser/policies/managed`, `/etc/opt/chrome/policies/managed`): 비밀번호 저장·번역 말풍선을 끄고, 클라우드 페이지가 `127.0.0.1` 로컬 서비스를 부를 때 권한 팝업이 뜨지 않게 허용

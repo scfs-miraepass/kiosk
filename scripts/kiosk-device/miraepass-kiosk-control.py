@@ -553,6 +553,38 @@ def save_rotation(rotation: str) -> None:
     os.replace(tmp, KIOSK_ENV_FILE)
 
 
+TOUCH_CONF = os.environ.get("MIRAEPASS_KIOSK_TOUCH_CONF", "/etc/X11/xorg.conf.d/99-miraepass-touch-rotation.conf")
+TOUCH_MATRIX = {
+    "normal": "1 0 0 0 1 0 0 0 1",
+    "left": "0 -1 1 1 0 0 0 0 1",
+    "right": "0 1 0 -1 0 1 0 0 1",
+    "inverted": "-1 0 1 0 -1 1 0 0 1",
+}
+
+
+def write_touch_conf(rotation: str) -> None:
+    """저장된 방향을 Xorg 입력 설정으로도 남긴다.
+    터치 장치가 다시 연결되면(USB 재인식·화면 전원 재투입) xinput으로 준 값이 사라지는데,
+    이 설정이 있으면 새로 잡힌 터치스크린에도 같은 변환 행렬이 자동으로 적용된다.
+    회전 스크립트의 xinput 값과 같은 속성(TransformationMatrix)이라 이중으로 돌지 않는다."""
+    if rotation == "normal":
+        try:
+            os.unlink(TOUCH_CONF)
+        except FileNotFoundError:
+            pass
+        return
+    os.makedirs(os.path.dirname(TOUCH_CONF), exist_ok=True)
+    with open(TOUCH_CONF, "w", encoding="utf-8") as f:
+        f.write(
+            "# MIRAEPASS 키오스크 화면 방향에 맞춘 터치 좌표 변환 (관리자 모드가 자동 생성)\n"
+            'Section "InputClass"\n'
+            '    Identifier "miraepass touchscreen rotation"\n'
+            '    MatchIsTouchscreen "on"\n'
+            f'    Option "TransformationMatrix" "{TOUCH_MATRIX[rotation]}"\n'
+            "EndSection\n"
+        )
+
+
 def apply_rotation(rotation: str) -> None:
     """키오스크 X 화면(:0)에 회전과 터치 좌표 보정을 바로 적용한다."""
     if not os.path.exists(ROTATE_BIN):
@@ -626,6 +658,7 @@ def confirm_rotation() -> dict[str, Any]:
             rotation = _pending["rotation"]
             _clear_pending()
             save_rotation(rotation)
+            write_touch_conf(rotation)
         return display_status()
 
 
@@ -938,12 +971,15 @@ ROUTES: dict[tuple[str, str], Any] = {
 
 
 def cli(args: list[str]) -> int:
-    """설치 스크립트용: miraepass-kiosk-control.py firewall on|off|status"""
+    """설치 스크립트용: miraepass-kiosk-control.py firewall on|off|status | touch-conf <방향>"""
+    if len(args) == 2 and args[0] == "touch-conf" and args[1] in ROTATIONS:
+        write_touch_conf(args[1])
+        return 0
     if len(args) == 2 and args[0] == "firewall" and args[1] in ("on", "off", "status"):
         result = security_status() if args[1] == "status" else set_firewall(args[1] == "on")
         print(json.dumps(result, ensure_ascii=False))
         return 0
-    print("usage: miraepass-kiosk-control.py firewall on|off|status", file=sys.stderr)
+    print("usage: miraepass-kiosk-control.py firewall on|off|status | touch-conf normal|left|right|inverted", file=sys.stderr)
     return 2
 
 
