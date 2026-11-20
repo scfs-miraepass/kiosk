@@ -86,6 +86,7 @@ chromium-browser --kiosk --noerrdialogs --disable-infobars --no-first-run \
 | `MIRAEPASS_API_URL` | MIRAEPASS API 주소 |
 | `MIRAEPASS_SERVICE_ID` / `MIRAEPASS_SERVICE_PASSWORD` | 결제용 서비스 계정. **DEDUCT_POINT**(결제)와 **GRANT_POINT**(취소 환불) 권한이 필요합니다 |
 | `MIRAEPASS_MOCK` | `1`이면 모의 모드 |
+| `MIRAEPASS_TIMEOUT_MS` | MIRAEPASS 요청 하나의 제한 시간(ms). 기본 `8000` |
 | `ADMIN_USER_IDS` / `STAFF_USER_IDS` | 관리자·직원으로 로그인할 수 있는 MIRAEPASS ID 목록(쉼표로 구분) |
 | `SESSION_SECRET` | 세션 암호화 키(32자 이상) |
 | `KIOSK_DEVICE_TOKEN` | 키오스크 기기 등록 토큰 |
@@ -96,6 +97,7 @@ chromium-browser --kiosk --noerrdialogs --disable-infobars --no-first-run \
 **MIRAEPASS ID**는 4자리입니다. 학생은 학번(3학년 4반 12번 → `3412`), 교사는 고유 4자리 번호입니다.
 
 1. 키오스크에서 ID를 입력하면 `POST /api/customers/lookup`이 MIRAEPASS `/search`로 학생·교사를 찾습니다. 이름은 가운데를 가려서(최*딩) 보여주고, 잔액이 확실히 부족하면 여기서 미리 알려줍니다.
+   - 비교 금액은 키오스크가 보낸 장바구니로 서버가 다시 계산합니다. 임의 금액을 받으면 금액을 바꿔 가며 조회해 잔액을 알아낼 수 있기 때문입니다. 같은 ID는 10분에 10번까지만 조회할 수 있습니다.
 2. 키오스크 비밀번호(숫자 6자리)를 입력하면 `POST /api/orders`를 호출합니다. 비밀번호는 이 요청에만 쓰고 키오스크 메모리에서 바로 지웁니다.
 3. 서버가 영업 상태를 확인하고, DB 기준으로 가격·옵션을 다시 계산하고, 고객을 다시 조회합니다.
 4. 서비스 계정으로 MIRAEPASS `POST /auth/kiosk`(키오스크 비밀번호 검사)를 호출합니다.
@@ -103,9 +105,15 @@ chromium-browser --kiosk --noerrdialogs --disable-infobars --no-first-run \
    - 같은 ID로 10분 안에 5번 틀리면 10분 동안 결제를 막습니다(`lib/pin-guard.ts`).
    - 비밀번호를 설정하지 않은 사용자는 MIRAEPASS에서 먼저 설정하도록 안내합니다.
 5. 비밀번호가 맞으면 주문을 `pending_payment`로 저장하고 `/point/deduct`로 차감합니다(`change_type: cafe`).
+   - MIRAEPASS가 거절하면(잔액 부족 등) 결제 실패(`failed`)로 남깁니다.
+   - **응답을 받지 못하면**(타임아웃·네트워크 오류·5xx) 실제로 빠졌는지 알 수 없으므로 실패로 단정하지 않고 **결제 확인 필요**(`payment_status = unknown`)로 남깁니다. 키오스크는 다시 결제하지 말고 직원에게 알리라고 안내합니다(이중 차감 방지).
+   - 관리자는 대시보드 배너나 주문 기록(결제 상태: 결제 확인 필요)에서 MIRAEPASS 포인트 내역을 보고 **차감됨 · 주문 접수** 또는 **차감 안 됨**으로 확정합니다. 차감됨으로 확정하면 주문번호가 붙어 직원 화면에 새 주문으로 올라갑니다.
+   - 서버가 결제·환불 도중 재시작되면 시작할 때 `pending_payment` 주문은 결제 확인 필요로, 환불 중이던 주문은 환불 실패로 바꿉니다(`lib/payment-recovery.ts`).
 6. 차감에 성공하면 그날의 주문번호를 부여하고, 직원 기기에 `order:new`를 보내며 "주문이 들어왔어요" 음성 알림이 나갑니다.
 7. 직원이 **제조 완료**를 누르면 `order:call`이 나가고 "3학년 홍길동님, 주문하신 음료가 나왔습니다"라고 호출합니다.
 8. 직원이 주문을 취소하면 `/point/grant`로 자동 환불합니다. 환불에 실패하면 `refund_failed`로 표시되고, 관리자 화면에서 다시 시도할 수 있습니다.
+   - 환불은 **취소된 주문만** 할 수 있습니다. 지급 전에 주문을 `refunding`으로 선점하므로 재시도를 여러 번 눌러도 한 번만 지급됩니다.
+   - 응답을 받지 못한 환불 실패는 이미 지급됐을 수 있으니 MIRAEPASS 포인트 내역을 확인한 뒤 재시도하세요.
 
 ## 음성 호출
 
@@ -119,7 +127,7 @@ chromium-browser --kiosk --noerrdialogs --disable-infobars --no-first-run \
 ```bash
 yarn typecheck     # tsc
 yarn lint          # eslint
-yarn test          # vitest (가격 계산, 영업시간, 포맷)
+yarn test          # vitest (결제·환불 흐름, MIRAEPASS 클라이언트, 고객 조회, 포맷 등)
 yarn db:generate   # 스키마를 바꾼 뒤 마이그레이션 생성
 ```
 
