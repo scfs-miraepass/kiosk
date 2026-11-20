@@ -7,19 +7,23 @@
 #   - Fedora 등 dnf 계열, Arch 등 pacman 계열
 #   - 그 밖의 배포판: 필요한 패키지를 직접 설치한 뒤 SKIP_PACKAGES=1 로 실행
 #
-# SSH로 접속해 실행하는 것을 기준으로 한다.
-# 이미 설치된 기기에서는 실행되지 않는다. 다시 설치하려면 먼저 삭제(uninstall.sh)한 뒤 실행한다.
-# 설치는 항상 아래 기본값(또는 실행할 때 준 값)으로 시작한다.
+# 사용법
+#   sudo CLOUD_URL=https://cafe.example.com/kiosk ADMIN_PIN=2580 ./install.sh   # 처음 설치
+#   sudo ./install.sh --update                                                  # 설치된 기기 업데이트
 #
-#   sudo CLOUD_URL=https://cafe.example.com/kiosk ADMIN_PIN=2580 ./install.sh
+# 처음 설치: SSH로 접속해 실행하는 것을 기준으로 한다. 이미 설치된 기기에서는 실행되지 않는다.
+#   다시 설치하려면 먼저 삭제(uninstall.sh)한 뒤 실행한다. 설치는 항상 아래 기본값(또는 실행할 때 준 값)으로 시작한다.
+# 업데이트(--update): 설정(URL·PIN·화면 방향·방화벽·네트워크 등)은 그대로 두고 프로그램 파일만 새 버전으로 바꾼다.
+#   보통은 자동 업데이트나 관리자 모드 › 업데이트가 실행한다.
 #
-# 선택 환경 변수
+# 선택 환경 변수 (처음 설치)
 #   KIOSK_USER      키오스크를 실행할 사용자 (기본: sudo를 실행한 사용자)
 #   WIFI_COUNTRY    Wi‑Fi 국가 코드 (기본: KR)
 #   DISPLAY_ROTATE  화면 회전: normal | left | right | inverted (기본: normal). 터치 좌표도 같이 돌린다.
 #   HIDE_CURSOR     1이면 마우스 커서를 숨긴다 (기본: 1, 터치 전용 기기)
 #   FIREWALL        1이면 들어오는 연결을 모두 차단하는 방화벽을 켠다 (기본: 1).
 #                   SSH가 켜져 있으면 SSH 포트는 허용된다. 관리자 모드 › 보안에서 켜고 끌 수 있다.
+#   AUTO_UPDATE     1이면 매일 새벽 자동 업데이트 (기본: 1). 관리자 모드 › 업데이트에서 켜고 끌 수 있다.
 #   CHROMIUM_EXTRA_FLAGS  Chromium 추가 플래그 (기본: 라즈베리파이는 GPU 래스터화 플래그, 그 외 없음)
 #   KIOSK_VERSION   관리자 모드에 표시할 버전 (기본: 저장소 package.json 버전 + git 커밋)
 #   SKIP_PACKAGES   1이면 패키지 설치를 건너뛴다 (지원하지 않는 배포판용)
@@ -27,6 +31,13 @@
 #                   다음 부팅부터 NetworkManager로 바꾼다. 지금 연결된 SSH는 끊지 않는다.
 #   REBOOT          1이면 설치 후 바로 재부팅
 set -euo pipefail
+
+MODE="install"
+case "${1:-}" in
+  "") ;;
+  --update) MODE="update" ;;
+  *) echo "사용법: $0 [--update]" >&2; exit 2 ;;
+esac
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "sudo로 실행하세요: sudo CLOUD_URL=https://example.com/kiosk $0" >&2
@@ -49,20 +60,29 @@ warn() { echo "    (경고) $*" >&2; }
 
 command -v systemctl >/dev/null 2>&1 || die "systemd가 필요합니다."
 
-# 이미 설치된 기기에서는 실행하지 않는다 (설정이 섞이지 않도록 삭제 후 기본값으로 새로 설치)
-for installed in /etc/miraepass/install-state \
-  /etc/systemd/system/miraepass-kiosk.service \
-  /etc/systemd/system/miraepass-kiosk-control.service \
-  /etc/systemd/system/miraepass-firewall.service; do
-  if [[ -e "${installed}" ]]; then
-    echo "이미 MIRAEPASS 키오스크가 설치돼 있습니다. (${installed})" >&2
-    echo "다시 설치하려면 먼저 삭제한 뒤 실행하세요:" >&2
-    echo "  sudo miraepass-kiosk-uninstall   # 또는 sudo ${SCRIPT_DIR}/uninstall.sh" >&2
-    echo "  sudo CLOUD_URL=... ${SCRIPT_DIR}/install.sh" >&2
-    exit 1
-  fi
-done
-command -v python3 >/dev/null 2>&1 || [[ "${SKIP_PACKAGES:-0}" != "1" ]] || die "python3가 필요합니다."
+STATE_DIR=/etc/miraepass
+STATE_FILE="${STATE_DIR}/install-state"
+
+if [[ "${MODE}" == "install" ]]; then
+  # 이미 설치된 기기에서는 실행하지 않는다 (설정이 섞이지 않도록 삭제 후 기본값으로 새로 설치)
+  for installed in "${STATE_FILE}" \
+    /etc/systemd/system/miraepass-kiosk.service \
+    /etc/systemd/system/miraepass-kiosk-control.service \
+    /etc/systemd/system/miraepass-firewall.service; do
+    if [[ -e "${installed}" ]]; then
+      echo "이미 MIRAEPASS 키오스크가 설치돼 있습니다. (${installed})" >&2
+      echo "새 버전으로 바꾸려면:   sudo ${SCRIPT_DIR}/install.sh --update" >&2
+      echo "처음부터 다시 설치하려면 먼저 삭제한 뒤 실행하세요:" >&2
+      echo "  sudo miraepass-kiosk-uninstall   # 또는 sudo ${SCRIPT_DIR}/uninstall.sh" >&2
+      echo "  sudo CLOUD_URL=... ${SCRIPT_DIR}/install.sh" >&2
+      exit 1
+    fi
+  done
+  command -v python3 >/dev/null 2>&1 || [[ "${SKIP_PACKAGES:-0}" != "1" ]] || die "python3가 필요합니다."
+else
+  [[ -f "${STATE_FILE}" && -f /etc/default/miraepass-kiosk && -f /etc/default/miraepass-kiosk-control ]] \
+    || die "설치된 키오스크를 찾을 수 없습니다. 처음 설치는 --update 없이 실행하세요."
+fi
 
 # ───────────────────────── 기기 / 배포판 감지 ─────────────────────────
 
@@ -74,6 +94,8 @@ fi
 DEVICE_MODEL="$(tr -d '\0' </proc/device-tree/model 2>/dev/null || cat /sys/class/dmi/id/product_name 2>/dev/null || echo "알 수 없음")"
 IS_RPI=0
 [[ "${DEVICE_MODEL}" == *"Raspberry Pi"* ]] && IS_RPI=1
+
+if [[ "${MODE}" == "install" ]]; then
 
 PKG="none"
 if [[ "${SKIP_PACKAGES:-0}" != "1" ]]; then
@@ -352,6 +374,45 @@ if [[ "${NET_MANAGER}" == "networkmanager" ]]; then
   nmcli radio wifi on 2>/dev/null || true
 fi
 
+else
+
+# ───────────────────────── 기존 설정 읽기 (--update) ─────────────────────────
+
+conf() { sed -n "s/^$2=//p" "$1" 2>/dev/null | head -n1 | sed 's/^"//; s/"$//'; }
+CLOUD_URL="$(conf /etc/default/miraepass-kiosk KIOSK_URL)"
+DISPLAY_ROTATE="$(conf /etc/default/miraepass-kiosk DISPLAY_ROTATE)"
+CHROMIUM_EXTRA_FLAGS="$(conf /etc/default/miraepass-kiosk CHROMIUM_EXTRA_FLAGS)"
+ADMIN_PIN="$(conf /etc/default/miraepass-kiosk-control MIRAEPASS_KIOSK_ADMIN_PIN)"
+KIOSK_USER="$(conf "${STATE_FILE}" KIOSK_USER)"
+HIDE_CURSOR=0
+grep -q -- "-nocursor" /etc/systemd/system/miraepass-kiosk.service 2>/dev/null && HIDE_CURSOR=1
+DISPLAY_ROTATE="${DISPLAY_ROTATE:-normal}"
+NEED_REBOOT=0
+
+[[ -n "${CLOUD_URL}" && -n "${ADMIN_PIN}" && -n "${KIOSK_USER}" ]] || die "기존 설정을 읽지 못했습니다. 삭제 후 다시 설치해 주세요."
+id "${KIOSK_USER}" >/dev/null 2>&1 || die "키오스크 사용자 ${KIOSK_USER}를 찾을 수 없습니다."
+KIOSK_HOME="$(getent passwd "${KIOSK_USER}" | cut -d: -f6)"
+for cmd in xinit Xorg nmcli nft python3; do
+  command -v "${cmd}" >/dev/null 2>&1 || die "${cmd} 명령이 없습니다. 이 업데이트는 새 패키지가 필요하니 삭제 후 다시 설치해 주세요."
+done
+
+echo "==> 업데이트 (설정 유지)"
+echo "    기기: ${DEVICE_MODEL} · ${OS_NAME}"
+echo "    사용자: ${KIOSK_USER} · 키오스크 URL: ${CLOUD_URL}"
+
+# 바뀌었을 때만 키오스크 화면을 다시 시작하려고, 화면에 영향을 주는 파일의 지금 상태를 기억해 둔다
+SCREEN_FILES=(
+  /usr/local/bin/miraepass-kiosk-session
+  /usr/local/bin/miraepass-kiosk-rotate
+  /etc/systemd/system/miraepass-kiosk.service
+  /etc/default/miraepass-kiosk
+  /etc/chromium/policies/managed/miraepass-kiosk.json
+)
+screen_digest() { cat "${SCREEN_FILES[@]}" 2>/dev/null | sha256sum | cut -d' ' -f1; }
+SCREEN_BEFORE="$(screen_digest)"
+
+fi
+
 # 설치하는 키오스크 버전: 저장소 package.json 버전 + git 커밋 (관리자 모드에 표시)
 # scripts/kiosk-device 폴더만 복사해 설치하면 알 수 없으므로 KIOSK_VERSION으로 직접 줄 수 있다.
 REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -368,6 +429,8 @@ if [[ -z "${KIOSK_VERSION:-}" && -f "${REPO_DIR}/package.json" ]]; then
   fi
 fi
 KIOSK_VERSION="${KIOSK_VERSION:-unknown}"
+# 설치한 스크립트 묶음의 내용 해시 (서버 묶음과 비교해 업데이트 여부를 판단). 업데이트 실행기는 받은 해시를 넘겨준다.
+KIOSK_BUNDLE_HASH="${KIOSK_BUNDLE_HASH:-$(python3 "${SCRIPT_DIR}/miraepass-kiosk-control.py" bundle-hash "${SCRIPT_DIR}")}"
 
 # 클라우드 페이지 → 127.0.0.1 로컬 서비스 호출을 Chromium 정책으로 허용할 origin
 CLOUD_ORIGIN="$(python3 -c 'import sys,urllib.parse as u; p=u.urlsplit(sys.argv[1]); print(f"{p.scheme}://{p.netloc}")' "${CLOUD_URL}")"
@@ -405,15 +468,21 @@ install -m 0644 "${SCRIPT_DIR}/launch.html" /usr/local/share/miraepass-kiosk/lau
 # 저장소 폴더 없이도 지울 수 있도록 삭제 스크립트를 함께 둔다
 install -m 0755 "${SCRIPT_DIR}/uninstall.sh" /usr/local/sbin/miraepass-kiosk-uninstall
 mkdir -p /etc/default
+# 사용자가 직접 추가한 줄(예: MIRAEPASS_KIOSK_ALLOWED_ORIGINS)은 업데이트해도 남긴다
+keep_extra() { grep -v -E "^($2)=" "$1" 2>/dev/null | grep -v -E '^\s*(#|$)' || true; }
+EXTRA_CONTROL_ENV="$(keep_extra /etc/default/miraepass-kiosk-control 'MIRAEPASS_KIOSK_(ADMIN_PIN|ALLOW_POWER|URL|VERSION|BUNDLE_HASH|USER|ENV_FILE|ROTATE_BIN)')"
+EXTRA_KIOSK_ENV="$(keep_extra /etc/default/miraepass-kiosk 'KIOSK_URL|DISPLAY_ROTATE|CHROMIUM_EXTRA_FLAGS')"
 cat >/etc/default/miraepass-kiosk-control <<DEFAULT
 MIRAEPASS_KIOSK_ADMIN_PIN=${ADMIN_PIN}
 MIRAEPASS_KIOSK_ALLOW_POWER=1
 MIRAEPASS_KIOSK_URL=${CLOUD_URL}
 MIRAEPASS_KIOSK_VERSION=${KIOSK_VERSION}
+MIRAEPASS_KIOSK_BUNDLE_HASH=${KIOSK_BUNDLE_HASH}
 MIRAEPASS_KIOSK_USER=${KIOSK_USER}
 MIRAEPASS_KIOSK_ENV_FILE=/etc/default/miraepass-kiosk
 MIRAEPASS_KIOSK_ROTATE_BIN=/usr/local/bin/miraepass-kiosk-rotate
 DEFAULT
+[[ -n "${EXTRA_CONTROL_ENV}" ]] && echo "${EXTRA_CONTROL_ENV}" >>/etc/default/miraepass-kiosk-control
 chmod 0600 /etc/default/miraepass-kiosk-control
 
 PYTHON_BIN="$(command -v python3)"
@@ -434,6 +503,35 @@ RestartSec=2
 [Install]
 WantedBy=multi-user.target
 SERVICE
+
+# 업데이트: 관리자 모드 요청이나 매일 새벽 타이머로 실행. 로컬 서비스와 다른 프로세스라 적용 중 서비스가 재시작돼도 끊기지 않는다.
+cat >/etc/systemd/system/miraepass-kiosk-update.service <<SERVICE
+[Unit]
+Description=MIRAEPASS kiosk device script update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/default/miraepass-kiosk-control
+Environment=PYTHONUNBUFFERED=1
+ExecStart=${PYTHON_BIN} /usr/local/bin/miraepass-kiosk-control.py update
+TimeoutStartSec=20min
+SERVICE
+
+cat >/etc/systemd/system/miraepass-kiosk-update.timer <<'TIMER'
+[Unit]
+Description=MIRAEPASS kiosk daily update check
+
+[Timer]
+# 매일 새벽 3:30 전후 (기기마다 최대 30분 분산). 그 시간에 꺼져 있었으면 다음 부팅 때 실행한다.
+OnCalendar=*-*-* 03:30
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+TIMER
 
 # ───────────────────────── 키오스크 세션 ─────────────────────────
 
@@ -555,7 +653,7 @@ chmod 0755 /usr/local/bin/miraepass-kiosk-session
 
 # 라즈베리파이 GPU(VideoCore)는 블록리스트를 풀어야 GPU 래스터화가 켜진다. 다른 기기는 Chromium 기본값을 쓴다.
 CHROMIUM_EXTRA_FLAGS="${CHROMIUM_EXTRA_FLAGS:-}"
-if [[ -z "${CHROMIUM_EXTRA_FLAGS}" && "${IS_RPI}" == "1" ]]; then
+if [[ "${MODE}" == "install" && -z "${CHROMIUM_EXTRA_FLAGS}" && "${IS_RPI}" == "1" ]]; then
   CHROMIUM_EXTRA_FLAGS="--ignore-gpu-blocklist --enable-gpu-rasterization"
 fi
 
@@ -564,6 +662,7 @@ KIOSK_URL=${CLOUD_URL}
 DISPLAY_ROTATE=${DISPLAY_ROTATE}
 CHROMIUM_EXTRA_FLAGS="${CHROMIUM_EXTRA_FLAGS}"
 DEFAULT
+[[ -n "${EXTRA_KIOSK_ENV}" ]] && echo "${EXTRA_KIOSK_ENV}" >>/etc/default/miraepass-kiosk
 
 XORG_ARGS=":0 vt1 -keeptty -nolisten tcp -s 0 -dpms"
 if [[ "${HIDE_CURSOR}" == "1" ]]; then
@@ -601,6 +700,7 @@ SERVICE
 
 # ───────────────────────── 활성화 ─────────────────────────
 
+if [[ "${MODE}" == "install" ]]; then
 echo "==> systemd 활성화"
 systemctl daemon-reload
 # 데스크톱 배포판이면 로그인 화면(디스플레이 매니저) 대신 키오스크가 tty1을 쓴다
@@ -624,11 +724,39 @@ else
   "${PYTHON_BIN}" /usr/local/bin/miraepass-kiosk-control.py firewall off >/dev/null || true
 fi
 
+AUTO_UPDATE="${AUTO_UPDATE:-1}"
+if [[ "${AUTO_UPDATE}" == "1" ]]; then
+  systemctl enable --now miraepass-kiosk-update.timer >/dev/null && echo "==> 자동 업데이트 켬 (매일 새벽 3:30 전후)"
+else
+  systemctl disable --now miraepass-kiosk-update.timer >/dev/null 2>&1 || true
+fi
+else
+  echo "==> 서비스 다시 시작"
+  systemctl daemon-reload
+  systemctl restart miraepass-kiosk-control.service
+  "${PYTHON_BIN}" /usr/local/bin/miraepass-kiosk-control.py touch-conf "${DISPLAY_ROTATE}" >/dev/null || warn "터치 회전 설정 파일을 쓰지 못했습니다"
+  # 방화벽이 켜져 있으면 새 코드로 규칙을 다시 만든다 (꺼져 있으면 그대로)
+  if systemctl is-enabled --quiet miraepass-firewall.service 2>/dev/null; then
+    "${PYTHON_BIN}" /usr/local/bin/miraepass-kiosk-control.py firewall on >/dev/null || warn "방화벽 규칙을 다시 만들지 못했습니다"
+  fi
+  # 자동 업데이트 켜짐/꺼짐은 사용자가 정한 대로 둔다
+  if [[ "$(screen_digest)" != "${SCREEN_BEFORE}" ]] && systemctl is-active --quiet miraepass-kiosk.service; then
+    echo "==> 화면 관련 파일이 바뀌어 키오스크 화면을 다시 시작합니다"
+    systemctl restart miraepass-kiosk.service || warn "키오스크 화면을 다시 시작하지 못했습니다"
+  fi
+fi
+
 sleep 1
 if systemctl is-active --quiet miraepass-kiosk-control.service; then
   echo "    로컬 제어 서비스 실행 중 (127.0.0.1:8765)"
 else
   warn "로컬 제어 서비스가 실행되지 않았습니다: journalctl -u miraepass-kiosk-control -n 50"
+fi
+
+if [[ "${MODE}" == "update" ]]; then
+  echo
+  echo "업데이트 완료: ${KIOSK_VERSION}"
+  exit 0
 fi
 
 echo

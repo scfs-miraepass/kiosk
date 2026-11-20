@@ -29,7 +29,8 @@ state() { sed -n "s/^$1=//p" "${STATE_FILE}" 2>/dev/null | head -n1; }
 warn() { echo "    (경고) $*" >&2; }
 
 if [[ ! -e /etc/systemd/system/miraepass-kiosk.service && ! -e /etc/systemd/system/miraepass-kiosk-control.service \
-  && ! -e /etc/systemd/system/miraepass-firewall.service && ! -d "${STATE_DIR}" ]]; then
+  && ! -e /etc/systemd/system/miraepass-firewall.service && ! -e /etc/systemd/system/miraepass-kiosk-update.service \
+  && ! -d "${STATE_DIR}" ]]; then
   echo "MIRAEPASS 키오스크가 설치돼 있지 않습니다."
   exit 0
 fi
@@ -40,7 +41,7 @@ if [[ -z "${KIOSK_USER}" ]]; then
 fi
 
 echo "MIRAEPASS 키오스크를 삭제합니다."
-echo "  - 키오스크 화면, 로컬 제어 서비스, 방화벽(들어오는 연결 차단)이 제거됩니다."
+echo "  - 키오스크 화면, 로컬 제어 서비스, 방화벽(들어오는 연결 차단), 자동 업데이트가 제거됩니다."
 echo "  - 네트워크 설정과 SSH 상태는 그대로 둡니다."
 [[ "${KEEP_BROWSER_DATA:-0}" != "1" ]] && echo "  - 저장된 기기 토큰(${KIOSK_USER:-키오스크 사용자}의 Chromium 프로필)도 삭제합니다."
 if [[ "${YES:-0}" != "1" ]]; then
@@ -56,7 +57,7 @@ fi
 
 echo "==> 서비스 중지 / 삭제"
 # 방화벽은 ExecStop에서 nftables 테이블을 지운다
-for unit in miraepass-kiosk.service miraepass-kiosk-control.service miraepass-firewall.service; do
+for unit in miraepass-kiosk-update.timer miraepass-kiosk-update.service miraepass-kiosk.service miraepass-kiosk-control.service miraepass-firewall.service; do
   if [[ -e "/etc/systemd/system/${unit}" ]]; then
     systemctl disable --now "${unit}" >/dev/null 2>&1 || true
     rm -f "/etc/systemd/system/${unit}"
@@ -82,7 +83,7 @@ rm -f \
   /etc/chromium/policies/managed/miraepass-kiosk.json \
   /etc/chromium-browser/policies/managed/miraepass-kiosk.json \
   /etc/opt/chrome/policies/managed/miraepass-kiosk.json
-rm -rf /usr/local/share/miraepass-kiosk
+rm -rf /usr/local/share/miraepass-kiosk /var/lib/miraepass
 
 # ───────────────────────── 시스템 설정 되돌리기 ─────────────────────────
 

@@ -48,6 +48,9 @@ RUN yarn build && yarn build:server
 
 # ---------- 실행 ----------
 FROM base AS runner
+# 선택: 빌드한 커밋 (기기 스크립트 버전 표시에 붙음). 예: docker build --build-arg GIT_COMMIT=$(git rev-parse HEAD) .
+ARG GIT_COMMIT=""
+ENV GIT_COMMIT=${GIT_COMMIT}
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
@@ -60,6 +63,8 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/drizzle ./drizzle
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/.next ./.next
+# 키오스크 기기가 /api/kiosk/device-bundle 로 받아 가는 기기 스크립트 (업데이트용)
+COPY --from=builder /app/scripts/kiosk-device ./scripts/kiosk-device
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN rm -rf .next/cache && mkdir -p data && chown node:node data
 

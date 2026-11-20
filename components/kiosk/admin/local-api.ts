@@ -141,3 +141,40 @@ export type SecurityStatus = {
   ssh: { installed: boolean; enabled: boolean; ports: number[] };
   firewall: { available: boolean; enabled: boolean; active: boolean; sshPorts: number[]; others: string[] };
 };
+
+export type UpdateState = "checking" | "downloading" | "installing" | "done" | "uptodate" | "failed";
+
+export type UpdateStatus = {
+  /** 기기 스크립트 버전 */
+  version: string;
+  bundleHash: string;
+  /** 업데이트가 지금 진행 중인지 */
+  running: boolean;
+  /** 자동 업데이트(매일 새벽) 켜짐 */
+  auto: boolean;
+  /** 다음 자동 업데이트 예정 시각 (systemd 표기) */
+  nextRun: string;
+  last: { state: UpdateState; message: string; manual: boolean; fromVersion?: string; toVersion?: string; updatedAt: number } | null;
+  log: string;
+};
+
+export type UpdateCheck = { current: string; latest: string; updateAvailable: boolean };
+
+/** 키오스크 앱 버전 (빌드할 때 package.json에서 넣음, next.config.ts) */
+export const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "";
+
+/** "1.1.1+a1b2c3d.dirty" → "1.1.1". 알 수 없으면 "" */
+export function baseVersion(version?: string) {
+  if (!version || version === "unknown") return "";
+  return version.split("+")[0];
+}
+
+/** 기기 스크립트 버전 표시: v1.1.1 (커밋 a1b2c3d, 수정됨) */
+export function versionLabel(version?: string) {
+  const base = baseVersion(version);
+  if (!base) return "알 수 없음 (저장소 밖에서 설치됨)";
+  const build = version!.split("+")[1];
+  if (!build) return `v${base}`;
+  const [commit, dirty] = build.split(".");
+  return `v${base} (커밋 ${commit}${dirty ? ", 수정본" : ""})`;
+}

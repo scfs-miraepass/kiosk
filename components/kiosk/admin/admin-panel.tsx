@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, ArrowLeft, Cable, KeyRound, Loader2, Monitor, Power, RefreshCw, Settings, ShieldCheck, Wifi } from "lucide-react";
+import { Activity, ArrowLeft, Cable, Download, KeyRound, Loader2, Monitor, Power, RefreshCw, Settings, ShieldCheck, Wifi } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useIdleTimer } from "@/hooks/use-idle-timer";
@@ -11,6 +11,7 @@ import { DisplaySection } from "./display-section";
 import { errorMessage, type Health, localApi, type NetworkStatus, setAdminToken } from "./local-api";
 import { type AdminSection, EthernetSection, StatusSection, WifiSection } from "./network-sections";
 import { SecuritySection } from "./security-section";
+import { UpdateSection } from "./update-section";
 
 /** 관리자 모드를 열어 두고 이 시간 동안 아무 입력이 없으면 키오스크로 돌아간다 */
 const ADMIN_IDLE_SECONDS = 180;
@@ -23,6 +24,7 @@ const NAV: { id: AdminSection; label: string; icon: React.ReactNode }[] = [
   { id: "wifi", label: "Wi‑Fi", icon: <Wifi className="size-6" /> },
   { id: "display", label: "화면", icon: <Monitor className="size-6" /> },
   { id: "security", label: "보안", icon: <ShieldCheck className="size-6" /> },
+  { id: "update", label: "업데이트", icon: <Download className="size-6" /> },
   { id: "token", label: "기기 토큰", icon: <KeyRound className="size-6" /> },
   { id: "power", label: "전원", icon: <Power className="size-6" /> },
 ];
@@ -187,6 +189,7 @@ export function KioskAdminPanel({ onClose, onTokenRegistered }: Props) {
                 {section === "wifi" && <WifiSection {...netProps} />}
                 {section === "display" && <DisplaySection disabled={!connected} />}
                 {section === "security" && <SecuritySection disabled={!connected} />}
+                {section === "update" && <UpdateSection disabled={!connected} onUpdated={() => void checkHealth()} />}
                 {section === "token" && <TokenSection onTokenRegistered={onTokenRegistered} />}
                 {section === "power" && <PowerSection health={health} />}
               </div>

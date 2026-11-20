@@ -12,35 +12,19 @@ import {
   type Health,
   localApi,
   type NetworkStatus,
+  APP_VERSION,
+  baseVersion,
   signalLevel,
+  versionLabel,
   WEAK_SIGNAL,
   type WifiNetwork,
   type WifiStatus,
 } from "./local-api";
 
-/** 키오스크 앱 버전 (빌드할 때 package.json에서 넣음, next.config.ts) */
-const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "";
-
-/** "1.1.1+a1b2c3d.dirty" → "1.1.1". 알 수 없으면 "" */
-function baseVersion(version?: string) {
-  if (!version || version === "unknown") return "";
-  return version.split("+")[0];
-}
-
-/** 기기 스크립트 버전 표시: v1.1.1 (커밋 a1b2c3d, 수정됨) */
-function versionLabel(version?: string) {
-  const base = baseVersion(version);
-  if (!base) return "알 수 없음 (저장소 밖에서 설치됨)";
-  const build = version!.split("+")[1];
-  if (!build) return `v${base}`;
-  const [commit, dirty] = build.split(".");
-  return `v${base} (커밋 ${commit}${dirty ? ", 수정본" : ""})`;
-}
-
 /** Wi‑Fi 화면을 보는 동안 신호 세기를 다시 읽는 간격 */
 const WIFI_POLL_MS = 5000;
 
-export type AdminSection = "status" | "ethernet" | "wifi" | "display" | "security" | "token" | "power";
+export type AdminSection = "status" | "ethernet" | "wifi" | "display" | "security" | "update" | "token" | "power";
 
 type NetworkProps = {
   network: NetworkStatus | null;
