@@ -1,16 +1,12 @@
 import { desc } from "drizzle-orm";
 import { handler, requireUser } from "@/lib/api";
+import { csvCell } from "@/lib/csv";
 import { OrdersQuery, ordersWhere } from "@/lib/admin-orders";
 import { db, schema } from "@/lib/db";
 import { PAYMENT_LABEL, STATUS_LABEL } from "@/lib/format";
 import { loadOrders } from "@/lib/orders";
 
 export const dynamic = "force-dynamic";
-
-const esc = (v: unknown) => {
-  const s = String(v ?? "");
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
 
 export const GET = handler(async (req) => {
   await requireUser("admin");
@@ -34,7 +30,7 @@ export const GET = handler(async (req) => {
       PAYMENT_LABEL[o.paymentStatus],
       o.cancelReason ?? "",
     ]
-      .map(esc)
+      .map(csvCell)
       .join(","),
   );
   const csv = "﻿" + [header.join(","), ...lines].join("\n");

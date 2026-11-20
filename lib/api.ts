@@ -69,16 +69,40 @@ export function requireKiosk(req: Request) {
   return token;
 }
 
-/** 아주 단순한 메모리 rate limit (키오스크 조회 남용 방지) */
-const buckets = new Map<string, { count: number; reset: number }>();
-export function rateLimit(key: string, limit: number, windowMs: number) {
-  const now = Date.now();
+type Bucket = { count: number; reset: number };
+
+declare global {
+  var __rateLimit: { buckets: Map<string, Bucket>; lastSweep: number } | undefined;
+}
+/** 라우트 번들마다 따로 생기지 않도록 globalThis에 둔다 (pin-guard와 같은 방식) */
+const limiter = (globalThis.__rateLimit ??= { buckets: new Map(), lastSweep: 0 });
+const SWEEP_INTERVAL_MS = 60_000;
+
+/** 아주 단순한 메모리 rate limit (키오스크 조회 남용 방지). 서버를 다시 시작하면 초기화된다 */
+export function rateLimit(key: string, limit: number, windowMs: number, now = Date.now()) {
+  const { buckets } = limiter;
+  // 만료된 키를 주기적으로 지운다. 지우지 않으면 로그인 ID처럼 임의 값이 키가 될 때 계속 쌓인다
+  if (now - limiter.lastSweep >= SWEEP_INTERVAL_MS) {
+    limiter.lastSweep = now;
+    for (const [k, v] of buckets) if (v.reset < now) buckets.delete(k);
+  }
   const b = buckets.get(key);
   if (!b || b.reset < now) {
     buckets.set(key, { count: 1, reset: now + windowMs });
     return;
   }
   if (++b.count > limit) throw new ApiError("RATE_LIMITED", "잠시 후 다시 시도해 주세요", 429);
+}
+
+/** 테스트용 */
+export function rateLimitSize() {
+  return limiter.buckets.size;
+}
+
+/** 테스트용 */
+export function resetRateLimit() {
+  limiter.buckets.clear();
+  limiter.lastSweep = 0;
 }
 
 export const idParam = (v: string) => {
