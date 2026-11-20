@@ -31,7 +31,7 @@ if [[ "${EUID}" -ne 0 ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-for f in miraepass-kiosk-control.py launch.html; do
+for f in miraepass-kiosk-control.py launch.html uninstall.sh; do
   if [[ ! -f "${SCRIPT_DIR}/${f}" ]]; then
     echo "${SCRIPT_DIR}/${f} 가 없습니다. scripts/kiosk-device 폴더를 통째로 복사해 주세요." >&2
     exit 1
@@ -293,7 +293,30 @@ IFACES
   : >/etc/NetworkManager/conf.d/10-globally-managed-devices.conf
   systemctl enable NetworkManager
   NEED_REBOOT=1
+  mkdir -p /etc/miraepass
+  grep -q "^NM_TAKEOVER_FROM=" /etc/miraepass/install-state 2>/dev/null \
+    || echo "NM_TAKEOVER_FROM=${NET_MANAGER}${BACKUP:+ (백업: ${BACKUP})}" >>/etc/miraepass/install-state
 fi
+
+# ───────────────────────── 설치 전 상태 기록 (삭제 스크립트용) ─────────────────────────
+# 처음 설치할 때의 값만 남긴다. 재설치해도 덮어쓰지 않으므로 uninstall.sh가 원래대로 되돌릴 수 있다.
+STATE_DIR=/etc/miraepass
+STATE_FILE="${STATE_DIR}/install-state"
+mkdir -p "${STATE_DIR}/backup"
+record_state() {
+  grep -q "^$1=" "${STATE_FILE}" 2>/dev/null || echo "$1=$2" >>"${STATE_FILE}"
+}
+record_state PREV_DEFAULT_TARGET "$(systemctl get-default 2>/dev/null || echo multi-user.target)"
+record_state GETTY_TTY1_ENABLED "$(systemctl is-enabled getty@tty1.service 2>/dev/null || echo enabled)"
+if ! grep -q "^XWRAPPER_BACKUP=" "${STATE_FILE}" 2>/dev/null; then
+  if [[ -f /etc/X11/Xwrapper.config ]]; then
+    cp -a /etc/X11/Xwrapper.config "${STATE_DIR}/backup/Xwrapper.config"
+    record_state XWRAPPER_BACKUP 1
+  else
+    record_state XWRAPPER_BACKUP 0
+  fi
+fi
+record_state KIOSK_USER "${KIOSK_USER}"
 
 # ───────────────────────── 시스템 설정 ─────────────────────────
 
@@ -363,6 +386,8 @@ install -m 0755 "${SCRIPT_DIR}/miraepass-kiosk-control.py" /usr/local/bin/miraep
 # 로컬 시작 화면: 인터넷이 없어도 이 화면에서 유선/Wi‑Fi를 설정할 수 있다
 install -d /usr/local/share/miraepass-kiosk
 install -m 0644 "${SCRIPT_DIR}/launch.html" /usr/local/share/miraepass-kiosk/launch.html
+# 저장소 폴더 없이도 지울 수 있도록 삭제 스크립트를 함께 둔다
+install -m 0755 "${SCRIPT_DIR}/uninstall.sh" /usr/local/sbin/miraepass-kiosk-uninstall
 mkdir -p /etc/default
 cat >/etc/default/miraepass-kiosk-control <<DEFAULT
 MIRAEPASS_KIOSK_ADMIN_PIN=${ADMIN_PIN}
@@ -582,6 +607,14 @@ else
   "${PYTHON_BIN}" /usr/local/bin/miraepass-kiosk-control.py firewall off >/dev/null || true
 fi
 
+# 재설치: 이미 떠 있는 키오스크 화면은 새 실행 스크립트로 다시 시작한다
+KIOSK_RESTARTED=0
+if [[ "${NEED_REBOOT}" != "1" ]] && systemctl is-active --quiet miraepass-kiosk.service; then
+  echo "==> 실행 중인 키오스크 화면 다시 시작"
+  systemctl restart miraepass-kiosk.service || warn "키오스크 화면을 다시 시작하지 못했습니다"
+  KIOSK_RESTARTED=1
+fi
+
 sleep 1
 if systemctl is-active --quiet miraepass-kiosk-control.service; then
   echo "    로컬 제어 서비스 실행 중 (127.0.0.1:8765)"
@@ -598,9 +631,12 @@ echo "- 재부팅하면 Chromium 키오스크가 자동 실행됩니다: sudo re
 if [[ "${NEED_REBOOT}" == "1" ]]; then
   echo "- NetworkManager 전환은 재부팅 후 적용됩니다. 재부팅 뒤 유선 LAN은 DHCP로 연결되며,"
   echo "  IP가 바뀌어 SSH 주소가 달라질 수 있습니다. (관리자 모드 › 상태에서 IP 확인)"
+elif [[ "${KIOSK_RESTARTED}" == "1" ]]; then
+  echo "- 키오스크 화면을 새 설정으로 다시 시작했습니다"
 else
   echo "- 지금 바로 시작: sudo systemctl start miraepass-kiosk"
 fi
+echo "- 삭제: sudo miraepass-kiosk-uninstall"
 echo "- 로그 확인: journalctl -u miraepass-kiosk -f"
 
 if [[ "${REBOOT:-0}" == "1" ]]; then

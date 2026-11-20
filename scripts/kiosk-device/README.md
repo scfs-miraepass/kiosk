@@ -68,6 +68,31 @@ Chromium 플래그는 `/etc/default/miraepass-kiosk`의 `CHROMIUM_EXTRA_FLAGS`�
 - Chromium 또는 Google Chrome
 - (선택) `openbox`
 
+## 재설치
+
+같은 명령으로 다시 실행하면 됩니다. 값을 생략하면 이전 설정을 그대로 씁니다.
+
+| 구분 | 재설치할 때 |
+| --- | --- |
+| 유지 | 키오스크 URL, 관리자 PIN, 화면 방향, 방화벽 켜짐/꺼짐, `CHROMIUM_EXTRA_FLAGS` |
+| 덮어씀 | 서비스·실행 스크립트·시작 화면·Chromium 정책 (최신 버전으로 교체) |
+| 건드리지 않음 | 저장된 유선/Wi‑Fi 연결, SSH 상태, Chromium 프로필(기기 토큰) |
+
+키오스크 화면이 실행 중이면 새 스크립트로 자동으로 다시 시작합니다.
+
+## 삭제
+
+```bash
+sudo miraepass-kiosk-uninstall            # 설치할 때 함께 복사됨 (저장소 폴더가 없어도 됨)
+# 또는
+sudo ./uninstall.sh
+```
+
+- 키오스크 화면·로컬 제어 서비스·방화벽 서비스와 설치한 설정 파일을 모두 지웁니다.
+- 설치 전에 기록해 둔 부팅 기본값(콘솔/데스크톱), tty1 로그인, Xorg 권한 설정을 원래대로 되돌립니다.
+- **SSH로 작업 중 연결이 끊기지 않도록** 네트워크 연결 설정과 SSH 상태는 그대로 둡니다. 설치한 패키지도 남겨 둡니다.
+- `REMOVE_BROWSER_DATA=1`: Chromium 프로필(저장된 기기 토큰)까지 삭제, `YES=1`: 확인 질문 생략, `REBOOT=1`: 삭제 후 재부팅
+
 ## 설치되는 것
 
 - `miraepass-kiosk.service`: tty1에서 Xorg → openbox → Chromium 키오스크를 자동 실행
