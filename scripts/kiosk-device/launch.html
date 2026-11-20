@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MIRAEPASS 키오스크</title>
+<!--
+  키오스크 로컬 시작 화면 (miraepass-kiosk-control 이 http://127.0.0.1:8765/launch 로 제공)
+  - 클라우드 키오스크 주소에 연결되면 그 페이지로 이동한다.
+  - 인터넷이 없을 때도 관리자 PIN 확인 후 유선 LAN / Wi‑Fi를 설정할 수 있다.
+  - 외부 리소스 없이 이 파일 하나로 동작한다. Pi GPU 부담을 줄이려고 흐림·그림자·애니메이션은 쓰지 않는다.
+-->
+<style>
+:root{--bg:#f1f5f9;--card:#fff;--line:#e2e8f0;--text:#0f172a;--muted:#64748b;--primary:#2563eb;--primary-weak:#eff6ff;--ok:#16a34a;--warn:#d97706;--err:#dc2626}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:"Pretendard","Noto Sans CJK KR","Noto Sans KR",sans-serif;user-select:none;-webkit-user-select:none}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;touch-action:manipulation}
+button:disabled{opacity:.45;cursor:default}
+[hidden]{display:none!important}
+.view{height:100%}
+/* 시작 화면 */
+#v-launch{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center;padding:24px}
+#v-launch h1{margin:0;font-size:30px}
+#v-launch p{margin:0;color:#475569;font-size:19px;line-height:1.5}
+#v-launch small{color:#94a3b8;font-size:15px}
+/* 공통 */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:56px;padding:0 22px;border-radius:16px;font-size:18px;font-weight:700}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:active{background:#1d4ed8}
+.btn-outline{background:#fff;border:2px solid var(--line)}
+.btn-outline:active{background:#f1f5f9}
+.btn-dark{background:#0f172a;color:#fff}
+.btn-block{width:100%}
+.card{background:var(--card);border:1px solid var(--line);border-radius:24px;padding:20px}
+.card h3{margin:0 0 14px;font-size:19px}
+.notice{border-radius:16px;padding:14px 16px;font-size:16px;font-weight:600;line-height:1.5;word-break:break-word}
+.n-info{background:#eff6ff;color:#1e3a8a}.n-success{background:#f0fdf4;color:#14532d}.n-warning{background:#fffbeb;color:#78350f}.n-error{background:#fef2f2;color:#991b1b}
+.dot{display:inline-block;width:12px;height:12px;border-radius:50%;background:#cbd5e1;flex:none}
+.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}
+dl.grid{display:grid;grid-template-columns:auto 1fr;gap:10px 22px;margin:0;font-size:16px}
+dl.grid dt{color:var(--muted)}dl.grid dd{margin:0;font-weight:600;word-break:break-all}
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-size:14px;font-weight:700;color:#334155}
+.field input{height:56px;border:2px solid var(--line);border-radius:16px;padding:0 16px;font:inherit;font-size:18px;background:#fff;color:var(--text);outline:none;width:100%;user-select:text}
+.field input:focus{border-color:var(--primary)}
+.field input:disabled{background:#f1f5f9;color:#94a3b8}
+.field .pw{position:relative}
+.field .pw input{padding-right:64px;-webkit-text-security:disc}
+.field .pw.show input{-webkit-text-security:none}
+.field .pw button{position:absolute;right:4px;top:4px;bottom:4px;width:56px;border-radius:12px;font-size:14px;font-weight:700;color:var(--muted)}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:#f1f5f9;border-radius:16px;padding:6px}
+.seg button{height:48px;border-radius:12px;font-size:16px;font-weight:700;color:#475569}
+.seg button.on{background:#fff;color:var(--primary);box-shadow:inset 0 0 0 2px var(--primary)}
+.stack{display:flex;flex-direction:column;gap:14px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:640px){.two{grid-template-columns:1fr}}
+/* PIN */
+#v-pin{display:flex;align-items:center;justify-content:center;padding:24px}
+#v-pin .card{width:100%;max-width:420px}
+.pin-dots{display:flex;justify-content:center;gap:10px;margin:18px 0}
+.pin-dots span{width:16px;height:16px;border-radius:50%;background:#cbd5e1}
+.pin-dots span.on{background:var(--primary)}
+.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.keypad button{height:68px;border-radius:16px;background:#f1f5f9;font-size:28px;font-weight:600}
+.keypad button:active{background:#e2e8f0}
+/* 설정 화면 */
+#v-setup{display:flex;flex-direction:column}
+#v-setup header{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff;border-bottom:1px solid var(--line);padding:12px 16px;flex:none}
+#v-setup header h1{margin:0;font-size:20px}
+#v-setup header p{margin:2px 0 0;display:flex;align-items:center;gap:8px;font-size:14px;color:var(--muted)}
+.tabs{display:flex;gap:8px;background:#fff;border-bottom:1px solid var(--line);padding:10px 16px;flex:none}
+.tabs button{height:52px;padding:0 22px;border-radius:14px;font-size:17px;font-weight:700;color:#475569}
+.tabs button.on{background:var(--primary);color:#fff}
+#scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+#content{max-width:760px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:16px}
+#content.kbd-open{padding-bottom:380px}
+.net-list{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.net-list button{display:flex;align-items:center;gap:12px;min-height:64px;padding:10px 16px;text-align:left;border-bottom:1px solid #f1f5f9;width:100%}
+.net-list button:last-child{border-bottom:0}
+.net-list button:active{background:#f1f5f9}
+.net-list .ssid{display:block;font-size:18px;font-weight:700}
+.net-list .meta{display:block;font-size:14px;color:var(--muted)}
+.net-list .grow{flex:1;min-width:0}
+.net-list .badge{background:var(--ok);color:#fff;border-radius:999px;padding:4px 12px;font-size:13px;font-weight:700}
+.net-list .active{background:#f0fdf4}
+.bars{font-family:monospace;font-size:15px;color:#475569;width:44px;flex:none}
+.online-banner{display:flex;align-items:center;justify-content:space-between;gap:12px}
+/* 터치 키보드 */
+#kbd{position:fixed;left:0;right:0;bottom:0;z-index:50;background:#0f172a;padding:10px;display:flex;flex-direction:column;gap:6px}
+#kbd .row{display:flex;justify-content:center;gap:6px}
+#kbd button{height:52px;min-width:52px;flex:1;max-width:72px;border-radius:12px;background:#fff;color:#0f172a;font-size:20px;font-weight:700}
+#kbd button:active{background:#dbeafe}
+#kbd button.wide{max-width:120px;font-size:16px}
+#kbd button.on{background:#3b82f6;color:#fff}
+#kbd button.act{background:#2563eb;color:#fff;max-width:160px;font-size:17px}
+#kbd button.space{max-width:360px;flex:4}
+#kbd .label{color:#93c5fd;font-size:13px;font-weight:700;text-align:center}
+</style>
+</head>
+<body>
+
+<!-- 1. 시작 화면 -->
+<section id="v-launch" class="view">
+  <h1>키오스크를 시작하고 있어요</h1>
+  <p id="msg">서버에 연결하는 중…</p>
+  <small id="detail"></small>
+  <button id="open-setup" class="btn btn-outline" hidden>네트워크 설정</button>
+</section>
+
+<!-- 2. 관리자 PIN -->
+<section id="v-pin" class="view" hidden>
+  <div class="card">
+    <h3 style="font-size:24px;margin-bottom:6px">관리자 PIN</h3>
+    <p style="margin:0;color:var(--muted)">네트워크 설정은 관리자 확인 후 사용할 수 있어요.</p>
+    <div class="pin-dots" id="pin-dots"></div>
+    <div id="pin-error" class="notice n-error" hidden style="margin-bottom:12px;text-align:center"></div>
+    <div class="keypad" id="keypad"></div>
+    <div class="two" style="margin-top:12px">
+      <button class="btn btn-outline" id="pin-cancel">취소</button>
+      <button class="btn btn-primary" id="pin-ok" disabled>확인</button>
+    </div>
+  </div>
+</section>
+
+<!-- 3. 네트워크 설정 -->
+<section id="v-setup" class="view" hidden>
+  <header>
+    <div>
+      <h1>네트워크 설정</h1>
+      <p><span class="dot" id="online-dot"></span><span id="online-text">서버 연결 안 됨</span></p>
+    </div>
+    <button class="btn btn-dark" id="setup-close">닫기</button>
+  </header>
+  <nav class="tabs">
+    <button data-tab="eth" class="on">유선 LAN</button>
+    <button data-tab="wifi">Wi‑Fi</button>
+  </nav>
+  <div id="scroll"><div id="content">
+    <div id="online-banner" class="notice n-success online-banner" hidden>
+      <span>서버에 연결됐어요.</span>
+      <button class="btn btn-primary" id="start-kiosk">키오스크 시작</button>
+    </div>
+
+    <!-- 유선 -->
+    <div id="tab-eth" class="stack">
+      <div class="card"><h3>현재 상태</h3><dl class="grid" id="eth-status"><dt>상태</dt><dd>확인 중…</dd></dl></div>
+      <div class="card stack">
+        <h3 style="margin:0">IP 설정</h3>
+        <div class="seg" id="eth-mode"><button data-v="dhcp" class="on">DHCP 자동</button><button data-v="static">고정 IP</button></div>
+        <p id="eth-dhcp-help" style="margin:0;color:#475569">공유기(DHCP 서버)에서 IP 주소를 자동으로 받아옵니다.</p>
+        <div id="eth-static" class="two" hidden>
+          <div class="field"><label>IP 주소</label><input id="eth-ip" data-kbd="IP 주소" placeholder="예: 192.168.0.50"></div>
+          <div class="field"><label>서브넷 마스크</label><input id="eth-mask" data-kbd="서브넷 마스크" value="255.255.255.0"></div>
+          <div class="field"><label>게이트웨이</label><input id="eth-gw" data-kbd="게이트웨이" placeholder="예: 192.168.0.1"></div>
+          <div class="field"><label>DNS (선택)</label><input id="eth-dns" data-kbd="DNS" placeholder="예: 8.8.8.8, 1.1.1.1"></div>
+        </div>
+        <div id="eth-notice" class="notice" hidden></div>
+        <button class="btn btn-primary btn-block" id="eth-apply">유선 설정 적용</button>
+      </div>
+    </div>
+
+    <!-- Wi‑Fi -->
+    <div id="tab-wifi" class="stack" hidden>
+      <div class="card"><h3>현재 연결</h3><dl class="grid" id="wifi-status"><dt>상태</dt><dd>확인 중…</dd></dl></div>
+      <div class="card stack" id="wifi-form" hidden>
+        <h3 style="margin:0">연결 설정</h3>
+        <div class="field"><label>Wi‑Fi 이름 (SSID)</label><input id="wifi-ssid" data-kbd="Wi‑Fi 이름"></div>
+        <div class="seg" id="wifi-mode"><button data-v="personal" class="on">일반 (WPA-Personal)</button><button data-v="enterprise">기업 (WPA-Enterprise)</button></div>
+        <div class="field" id="wifi-id-field" hidden><label>사용자 ID</label><input id="wifi-id" data-kbd="사용자 ID" placeholder="Enterprise ID"></div>
+        <div class="field"><label>비밀번호</label><div class="pw" id="wifi-pw-wrap"><input id="wifi-pw" data-kbd="비밀번호" placeholder="개방형 네트워크면 비워 두세요"><button id="wifi-pw-toggle" tabindex="-1">보기</button></div></div>
+        <div id="wifi-notice" class="notice" hidden></div>
+        <div class="two" style="grid-template-columns:1fr 2fr">
+          <button class="btn btn-outline" id="wifi-cancel">취소</button>
+          <button class="btn btn-primary" id="wifi-connect">연결</button>
+        </div>
+      </div>
+      <div class="card stack">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+          <h3 style="margin:0">주변 네트워크</h3>
+          <button class="btn btn-outline" id="wifi-scan" style="height:48px;font-size:16px">다시 검색</button>
+        </div>
+        <div id="wifi-scan-notice" class="notice" hidden></div>
+        <div id="wifi-list"><p style="color:var(--muted);text-align:center">‘다시 검색’을 눌러 주세요.</p></div>
+        <button class="btn btn-outline btn-block" id="wifi-hidden" style="font-size:16px">숨겨진 네트워크 직접 입력</button>
+      </div>
+    </div>
+  </div></div>
+</section>
+
+<!-- 터치 키보드 -->
+<div id="kbd" hidden></div>
+
+<script>
+"use strict";
+const KIOSK_URL = __KIOSK_URL__;
+const IDLE_MS = 5 * 60 * 1000; // 설정 화면에서 5분 동안 입력이 없으면 시작 화면으로
+const $ = (id) => document.getElementById(id);
+const show = (el, on) => { el.hidden = !on; };
+
+// ───────── 로컬 API ─────────
+let token = null;
+async function api(path, { method = "GET", body, timeout = 15000 } = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeout);
+  const headers = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (token) headers["X-Kiosk-Admin-Token"] = token;
+  let res;
+  try {
+    res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store", signal: ctrl.signal });
+  } catch (e) {
+    throw new Error(ctrl.signal.aborted ? "응답이 너무 오래 걸려요. 다시 시도해 주세요" : "로컬 서비스에 연결할 수 없어요");
+  } finally {
+    clearTimeout(timer);
+  }
+  const json = await res.json().catch(() => null);
+  if (res.status === 401 && token) { token = null; openPin("관리자 인증이 만료됐어요. PIN을 다시 입력해 주세요"); }
+  if (!res.ok || !json || !json.success) throw new Error((json && json.message) || "요청에 실패했어요");
+  return json.data;
+}
+function notice(el, tone, text) {
+  if (!text) { el.hidden = true; return; }
+  el.className = "notice n-" + tone;
+  el.textContent = text;
+  el.hidden = false;
+}
+function setRows(dl, rows) {
+  dl.replaceChildren();
+  for (const [k, v] of rows) {
+    const dt = document.createElement("dt"); dt.textContent = k;
+    const dd = document.createElement("dd"); dd.textContent = v || "-";
+    dl.append(dt, dd);
+  }
+}
+const STATE = { connected: "연결됨", disconnected: "연결 안 됨", unmanaged: "관리 안 됨", not_found: "장치 없음" };
+const stateLabel = (s, kind) => s === "unavailable" ? (kind === "eth" ? "케이블 없음" : "무선 꺼짐") : (s || "").startsWith("connecting") ? "연결 중" : STATE[s] || s || "알 수 없음";
+
+// ───────── 서버 연결 확인 ─────────
+let online = false;
+let tries = 0;
+let view = "launch";
+async function reachable() {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
+  try { await fetch(KIOSK_URL, { mode: "no-cors", cache: "no-store", signal: ctrl.signal }); return true; }
+  catch (e) { return false; }
+  finally { clearTimeout(timer); }
+}
+async function check() {
+  if (!KIOSK_URL) { $("msg").textContent = "키오스크 주소가 설정되지 않았어요. 설치 스크립트를 다시 실행해 주세요."; show($("open-setup"), true); return; }
+  tries += 1;
+  online = await reachable();
+  if (online && view === "launch") { location.replace(KIOSK_URL); return; }
+  if (view === "launch") {
+    $("msg").textContent = tries < 3 ? "서버에 연결하는 중…" : "네트워크에 연결되지 않았어요. 케이블 또는 Wi‑Fi를 확인해 주세요.";
+    $("detail").textContent = "자동으로 다시 시도합니다 (" + tries + "회)";
+    if (tries >= 2) show($("open-setup"), true);
+  }
+  $("online-dot").className = "dot" + (online ? " ok" : "");
+  $("online-text").textContent = online ? "서버 연결됨" : "서버 연결 안 됨";
+  show($("online-banner"), online);
+  setTimeout(check, 5000);
+}
+
+function go(next) {
+  view = next;
+  show($("v-launch"), next === "launch");
+  show($("v-pin"), next === "pin");
+  show($("v-setup"), next === "setup");
+  hideKbd();
+}
+
+// ───────── PIN ─────────
+let pin = "";
+function renderPin() {
+  $("pin-dots").replaceChildren(...Array.from({ length: 8 }, (_, i) => { const s = document.createElement("span"); if (i < pin.length) s.className = "on"; return s; }));
+  $("pin-ok").disabled = pin.length < 4;
+}
+function openPin(message) {
+  pin = ""; renderPin();
+  notice($("pin-error"), "error", message || "");
+  go("pin");
+}
+["1","2","3","4","5","6","7","8","9","지움","0","←"].forEach((k) => {
+  const b = document.createElement("button"); b.textContent = k;
+  b.onclick = () => {
+    if (k === "지움") pin = ""; else if (k === "←") pin = pin.slice(0, -1); else if (pin.length < 8) pin += k;
+    renderPin();
+  };
+  $("keypad").append(b);
+});
+$("pin-cancel").onclick = () => go("launch");
+$("pin-ok").onclick = async () => {
+  $("pin-ok").disabled = true;
+  try {
+    const res = await api("/admin/verify", { method: "POST", body: { pin } });
+    token = res.token;
+    openSetup();
+  } catch (e) {
+    pin = ""; renderPin();
+    notice($("pin-error"), "error", e.message);
+  }
+};
+$("open-setup").onclick = () => openPin();
+
+// ───────── 설정 화면 ─────────
+let idleTimer = null;
+function resetIdle() {
+  clearTimeout(idleTimer);
+  if (view === "setup") idleTimer = setTimeout(closeSetup, IDLE_MS);
+}
+["pointerdown", "keydown"].forEach((ev) => window.addEventListener(ev, resetIdle, { passive: true }));
+function openSetup() { go("setup"); resetIdle(); selectTab("eth"); }
+async function closeSetup() {
+  clearTimeout(idleTimer);
+  if (token) { api("/admin/logout", { method: "POST", body: {} }).catch(() => {}); token = null; }
+  if (online) { location.replace(KIOSK_URL); return; }
+  go("launch");
+}
+$("setup-close").onclick = closeSetup;
+$("start-kiosk").onclick = closeSetup;
+
+let tab = "eth";
+function selectTab(next) {
+  tab = next;
+  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === next));
+  show($("tab-eth"), next === "eth");
+  show($("tab-wifi"), next === "wifi");
+  $("scroll").scrollTop = 0;
+  if (next === "eth") loadEth(); else { loadWifi(); if (!scanned) scan(); }
+}
+document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => selectTab(b.dataset.tab)));
+function segment(id, onChange) {
+  const root = $(id);
+  root.querySelectorAll("button").forEach((b) => (b.onclick = () => { setSeg(id, b.dataset.v); onChange(b.dataset.v); }));
+}
+function setSeg(id, v) { $(id).querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === v)); }
+
+// ───────── 유선 LAN ─────────
+let ethMode = "dhcp";
+let ethPrefilled = false;
+function setEthMode(v) { ethMode = v; setSeg("eth-mode", v); show($("eth-static"), v === "static"); show($("eth-dhcp-help"), v === "dhcp"); }
+segment("eth-mode", setEthMode);
+function cidrToMask(cidr) {
+  const [ip, p] = cidr.split("/"); const bits = Number(p);
+  if (!p || !(bits >= 0 && bits <= 32)) return [ip, "255.255.255.0"];
+  const m = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return [ip, [24, 16, 8, 0].map((s) => (m >>> s) & 255).join(".")];
+}
+async function loadEth() {
+  try {
+    const s = await api("/ethernet/status");
+    if (!s.device) { setRows($("eth-status"), [["상태", "유선 네트워크 장치를 찾을 수 없어요"]]); $("eth-apply").disabled = true; return; }
+    $("eth-apply").disabled = false;
+    setRows($("eth-status"), [
+      ["상태", stateLabel(s.state, "eth") + " (" + s.device + ")"],
+      ["방식", s.method === "manual" ? "고정 IP" : "DHCP 자동"],
+      ["IP 주소", s.addresses.join(", ")],
+      ["게이트웨이", s.gateway],
+      ["DNS", s.dns.join(", ")],
+    ]);
+    if (!ethPrefilled) {
+      ethPrefilled = true;
+      if (s.method === "manual" && s.config) {
+        const [ip, mask] = cidrToMask(s.config.addresses[0] || "");
+        setEthMode("static");
+        $("eth-ip").value = ip || ""; $("eth-mask").value = mask; $("eth-gw").value = s.config.gateway || ""; $("eth-dns").value = s.config.dns.join(", ");
+      }
+    }
+  } catch (e) { setRows($("eth-status"), [["상태", e.message]]); }
+}
+$("eth-apply").onclick = async () => {
+  hideKbd();
+  if (ethMode === "static" && !$("eth-ip").value.trim()) { notice($("eth-notice"), "error", "IP 주소를 입력해 주세요"); return; }
+  $("eth-apply").disabled = true; $("eth-apply").textContent = "적용 중…";
+  notice($("eth-notice"), "info", "적용하는 중이에요. 네트워크가 잠깐 끊길 수 있어요.");
+  try {
+    const r = await api("/ethernet/config", { method: "POST", timeout: 60000, body: { mode: ethMode, address: $("eth-ip").value.trim(), netmask: $("eth-mask").value.trim(), gateway: $("eth-gw").value.trim(), dns: $("eth-dns").value.trim() } });
+    notice($("eth-notice"), r.activated ? "success" : "warning", r.message);
+    loadEth();
+  } catch (e) { notice($("eth-notice"), "error", e.message); }
+  finally { $("eth-apply").disabled = false; $("eth-apply").textContent = "유선 설정 적용"; }
+};
+
+// ───────── Wi‑Fi ─────────
+let wifiMode = "personal";
+let wifiHidden = false;
+let scanned = false;
+function setWifiMode(v) { wifiMode = v; setSeg("wifi-mode", v); show($("wifi-id-field"), v === "enterprise"); }
+segment("wifi-mode", setWifiMode);
+$("wifi-pw-toggle").onmousedown = (e) => e.preventDefault();
+$("wifi-pw-toggle").onclick = () => { const w = $("wifi-pw-wrap"); w.classList.toggle("show"); $("wifi-pw-toggle").textContent = w.classList.contains("show") ? "가리기" : "보기"; };
+async function loadWifi() {
+  try {
+    const s = (await api("/network/status", { timeout: 30000 })).wifi;
+    if (!s.device) { setRows($("wifi-status"), [["상태", "무선 네트워크 장치를 찾을 수 없어요"]]); return; }
+    setRows($("wifi-status"), [
+      ["상태", stateLabel(s.state, "wifi")],
+      ["네트워크", s.connected ? s.ssid || "" : ""],
+      ["신호", s.connected && s.signal != null ? bars(s.signal) + "  " + s.signal + "% · " + level(s.signal) + [s.dbm != null ? s.dbm + " dBm" : "", s.band, s.rate].filter(Boolean).map((v) => " · " + v).join("") : ""],
+      ["IP 주소", s.addresses.join(", ")],
+    ]);
+  } catch (e) { setRows($("wifi-status"), [["상태", e.message]]); }
+}
+// 관리자 모드와 같은 기준: 75↑ 매우 좋음, 50↑ 좋음, 30↑ 보통, 그 아래 약함
+const bars = (sig) => sig >= 75 ? "▂▄▆█" : sig >= 50 ? "▂▄▆_" : sig >= 30 ? "▂▄__" : "▂___";
+const level = (sig) => sig >= 75 ? "매우 좋음" : sig >= 50 ? "좋음" : sig >= 30 ? "보통" : "약함";
+async function scan() {
+  scanned = true;
+  $("wifi-scan").disabled = true; $("wifi-scan").textContent = "검색 중…";
+  notice($("wifi-scan-notice"), "", "");
+  try {
+    const list = await api("/wifi/scan", { timeout: 45000 });
+    const root = $("wifi-list"); root.replaceChildren();
+    if (!list.length) { const p = document.createElement("p"); p.textContent = "찾은 네트워크가 없어요."; p.style.cssText = "color:var(--muted);text-align:center"; root.append(p); return; }
+    const box = document.createElement("div"); box.className = "net-list";
+    for (const n of list) {
+      const b = document.createElement("button");
+      if (n.active) b.classList.add("active");
+      const sig = document.createElement("span"); sig.className = "bars"; sig.textContent = bars(n.signal);
+      const grow = document.createElement("span"); grow.className = "grow";
+      const ssid = document.createElement("span"); ssid.className = "ssid"; ssid.textContent = n.ssid;
+      const meta = document.createElement("span"); meta.className = "meta"; meta.textContent = [(n.security ? (n.enterprise ? "기업용 보안" : "보안") : "개방형"), "신호 " + n.signal + "% " + level(n.signal), (n.bands && n.bands.length ? n.bands.join(" / ") : n.band)].filter(Boolean).join(" · ");
+      grow.append(ssid, meta); b.append(sig, grow);
+      if (n.active) { const badge = document.createElement("span"); badge.className = "badge"; badge.textContent = "연결됨"; b.append(badge); }
+      b.onclick = () => openWifiForm(n.ssid, n.enterprise, false);
+      box.append(b);
+    }
+    root.append(box);
+  } catch (e) { notice($("wifi-scan-notice"), "error", e.message); }
+  finally { $("wifi-scan").disabled = false; $("wifi-scan").textContent = "다시 검색"; }
+}
+function openWifiForm(ssid, enterprise, hidden) {
+  wifiHidden = hidden;
+  $("wifi-ssid").value = ssid; $("wifi-ssid").disabled = !hidden;
+  $("wifi-pw").value = "";
+  setWifiMode(enterprise ? "enterprise" : "personal");
+  notice($("wifi-notice"), "", "");
+  show($("wifi-form"), true);
+  $("wifi-form").scrollIntoView({ block: "start" });
+}
+$("wifi-scan").onclick = scan;
+$("wifi-hidden").onclick = () => openWifiForm("", false, true);
+$("wifi-cancel").onclick = () => { hideKbd(); show($("wifi-form"), false); };
+$("wifi-connect").onclick = async () => {
+  hideKbd();
+  const ssid = $("wifi-ssid").value.trim();
+  if (!ssid) { notice($("wifi-notice"), "error", "Wi‑Fi 이름을 입력해 주세요"); return; }
+  $("wifi-connect").disabled = true; $("wifi-connect").textContent = "연결 중…";
+  notice($("wifi-notice"), "info", "연결하는 중이에요…");
+  try {
+    await api("/wifi/connect", { method: "POST", timeout: 90000, body: { ssid, securityMode: wifiMode, identity: $("wifi-id").value.trim(), password: $("wifi-pw").value, hidden: wifiHidden } });
+    notice($("wifi-notice"), "success", "‘" + ssid + "’에 연결했어요.");
+    $("wifi-pw").value = "";
+    loadWifi(); scan();
+  } catch (e) { notice($("wifi-notice"), "error", e.message); }
+  finally { $("wifi-connect").disabled = false; $("wifi-connect").textContent = "연결"; }
+};
+
+// ───────── 터치 키보드 ─────────
+const LETTERS = ["1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm"];
+const SYMBOLS = ["1234567890", "-_/.:@#$%&", "!?+=,;*()", "~'\"|\\<>[]"];
+let target = null, shift = false, symbols = false;
+const kbd = $("kbd");
+kbd.addEventListener("mousedown", (e) => e.preventDefault()); // 입력칸 포커스 유지
+kbd.addEventListener("pointerdown", (e) => e.preventDefault());
+function key(label, onTap, cls) {
+  const b = document.createElement("button");
+  b.textContent = label; b.tabIndex = -1;
+  if (cls) b.className = cls;
+  b.onclick = onTap;
+  return b;
+}
+function insert(text) { if (!target || target.disabled) return; target.value += text; }
+function renderKbd() {
+  kbd.replaceChildren();
+  const label = document.createElement("div"); label.className = "label"; label.textContent = (target && target.dataset.kbd ? target.dataset.kbd : "") + " 입력 중";
+  kbd.append(label);
+  (symbols ? SYMBOLS : LETTERS).forEach((row, i) => {
+    const r = document.createElement("div"); r.className = "row";
+    if (i === 3 && !symbols) r.append(key("⇧", () => { shift = !shift; renderKbd(); }, "wide" + (shift ? " on" : "")));
+    for (const ch of row) {
+      const out = shift && !symbols ? ch.toUpperCase() : ch;
+      r.append(key(out, () => { insert(out); if (shift && !symbols) { shift = false; renderKbd(); } }));
+    }
+    if (i === 3) r.append(key("⌫", () => { if (target && !target.disabled) target.value = target.value.slice(0, -1); }, "wide"));
+    kbd.append(r);
+  });
+  const last = document.createElement("div"); last.className = "row";
+  last.append(key(symbols ? "ABC" : "123", () => { symbols = !symbols; renderKbd(); }, "wide"));
+  last.append(key("공백", () => insert(" "), "space"));
+  last.append(key("완료", hideKbd, "act"));
+  kbd.append(last);
+}
+function hideKbd() {
+  if (target) target.blur();
+  target = null;
+  kbd.hidden = true;
+  $("content").classList.remove("kbd-open");
+}
+document.querySelectorAll("input[data-kbd]").forEach((input) => {
+  input.setAttribute("inputmode", "none");
+  input.setAttribute("autocomplete", "off");
+  input.setAttribute("autocapitalize", "off");
+  input.setAttribute("spellcheck", "false");
+  input.addEventListener("focus", () => {
+    target = input; renderKbd(); kbd.hidden = false;
+    $("content").classList.add("kbd-open");
+    requestAnimationFrame(() => input.scrollIntoView({ block: "center" }));
+  });
+  input.addEventListener("blur", () => setTimeout(() => {
+    if (document.activeElement && document.activeElement.matches("input[data-kbd]")) return;
+    if (target === input) hideKbd();
+  }, 150));
+});
+
+renderPin();
+check();
+</script>
+</body>
+</html>
