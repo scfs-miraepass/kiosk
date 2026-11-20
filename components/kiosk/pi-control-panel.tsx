@@ -12,7 +12,7 @@ const PI_CONTROL_URL = "http://127.0.0.1:8765";
 type WifiNetwork = { ssid: string; security: string; signal: number };
 type Health = { ok: boolean; hostname?: string; user?: string; version?: string };
 
-type FocusTarget = "adminToken" | "ssid" | "wifiPassword" | "wifiIdentity";
+type FocusTarget = "adminToken" | "ssid" | "wifiPassword" | "wifiIdentity" | "ethernetAddress" | "ethernetGateway" | "ethernetDns";
 
 type Props = {
   onFocusTarget: (target: FocusTarget) => void;
@@ -101,7 +101,10 @@ export function PiControlPanel({ onFocusTarget, onInputBlur, onClose, onTokenReg
             <h3 className="mb-4 flex items-center gap-2 text-lg font-extrabold">
               <Wifi className="size-5 text-primary" /> 네트워크 설정
             </h3>
-            <NetworkPanel disabled={!health} onFocusTarget={onFocusTarget} onInputBlur={onInputBlur} />
+            <div className="grid gap-4 xl:grid-cols-2">
+              <EthernetPanel disabled={!health} onFocusTarget={onFocusTarget} onInputBlur={onInputBlur} />
+              <WifiPanel disabled={!health} onFocusTarget={onFocusTarget} onInputBlur={onInputBlur} />
+            </div>
           </div>
         </div>
         <SystemPanel disabled={!health} onClose={onClose} />
@@ -172,7 +175,117 @@ function TokenResetPanel({
   );
 }
 
-function NetworkPanel({
+type EthernetStatus = { device: string | null; connection: string | null; state: string; addresses: string; routes: string };
+
+function EthernetPanel({
+  disabled,
+  onFocusTarget,
+  onInputBlur,
+}: {
+  disabled: boolean;
+  onFocusTarget: (target: FocusTarget) => void;
+  onInputBlur: () => void;
+}) {
+  const [mode, setMode] = useState<"dhcp" | "static">("dhcp");
+  const [address, setAddress] = useState("");
+  const [gateway, setGateway] = useState("");
+  const [dns, setDns] = useState("");
+  const [status, setStatus] = useState<EthernetStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useKioskTextInput("ethernetAddress", setAddress);
+  useKioskTextInput("ethernetGateway", setGateway);
+  useKioskTextInput("ethernetDns", setDns);
+
+  const refresh = async () => {
+    setLoading(true);
+    setMessage(null);
+    try {
+      setStatus(await localApi<EthernetStatus>("/ethernet/status"));
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "유선 네트워크 상태를 확인하지 못했어요");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const apply = async () => {
+    setLoading(true);
+    setMessage(null);
+    try {
+      await localApi("/ethernet/config", { method: "POST", body: JSON.stringify({ mode, address: address.trim(), gateway: gateway.trim(), dns: dns.trim() }) });
+      setMessage("유선 네트워크 설정을 적용했어요.");
+      await refresh();
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "유선 네트워크 설정에 실패했어요");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 rounded-3xl bg-white p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h4 className="font-extrabold">유선 LAN</h4>
+        <Button type="button" variant="outline" onClick={refresh} disabled={disabled || loading} className="h-10 rounded-xl">
+          {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} 상태
+        </Button>
+      </div>
+      {status && (
+        <p className="rounded-2xl bg-slate-100 p-3 text-xs text-slate-700">
+          장치: {status.device ?? "없음"} · 연결: {status.connection ?? "없음"} · 상태: {status.state}
+          {status.addresses && <span className="block whitespace-pre-wrap">{status.addresses}</span>}
+        </p>
+      )}
+      <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
+        <ModeButton active={mode === "dhcp"} onClick={() => setMode("dhcp")} disabled={disabled || loading}>
+          DHCP 자동
+        </ModeButton>
+        <ModeButton active={mode === "static"} onClick={() => setMode("static")} disabled={disabled || loading}>
+          고정 IP
+        </ModeButton>
+      </div>
+      {mode === "static" && (
+        <div className="space-y-2">
+          <Input
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            onFocus={() => onFocusTarget("ethernetAddress")}
+            onBlur={onInputBlur}
+            placeholder="IP/CIDR 예: 192.168.0.50/24"
+            className="h-12 text-base"
+            disabled={disabled || loading}
+          />
+          <Input
+            value={gateway}
+            onChange={(e) => setGateway(e.target.value)}
+            onFocus={() => onFocusTarget("ethernetGateway")}
+            onBlur={onInputBlur}
+            placeholder="게이트웨이 예: 192.168.0.1"
+            className="h-12 text-base"
+            disabled={disabled || loading}
+          />
+          <Input
+            value={dns}
+            onChange={(e) => setDns(e.target.value)}
+            onFocus={() => onFocusTarget("ethernetDns")}
+            onBlur={onInputBlur}
+            placeholder="DNS 예: 8.8.8.8,1.1.1.1"
+            className="h-12 text-base"
+            disabled={disabled || loading}
+          />
+        </div>
+      )}
+      {message && <p className="rounded-2xl bg-slate-100 p-3 text-sm text-slate-700">{message}</p>}
+      <Button type="button" onClick={apply} disabled={disabled || loading || (mode === "static" && !address.trim())} className="h-12 w-full rounded-xl text-base">
+        유선 설정 적용
+      </Button>
+    </div>
+  );
+}
+
+function WifiPanel({
   disabled,
   onFocusTarget,
   onInputBlur,

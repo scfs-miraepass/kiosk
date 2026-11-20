@@ -148,6 +148,9 @@ function KioskFlow({ token }: { token: string }) {
     ssid: "Wi‑Fi 이름",
     wifiIdentity: "Enterprise ID",
     wifiPassword: "Wi‑Fi 비밀번호",
+    ethernetAddress: "유선 IP/CIDR",
+    ethernetGateway: "유선 게이트웨이",
+    ethernetDns: "유선 DNS",
   };
 
   useIdleTimer(kiosk.idleSeconds, goHome, INTERACTIVE.includes(step) && !paying);

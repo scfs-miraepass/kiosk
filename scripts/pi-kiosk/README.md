@@ -34,6 +34,9 @@ journalctl -u miraepass-pi-control -f
 키오스크 화면에서 로고(영업 종료 화면은 달 아이콘)를 5초 이상 길게 누른 뒤 관리자 PIN을 입력하면 관리자 모드가 열립니다. 관리자 모드에서는 다음을 터치로 사용할 수 있습니다.
 
 - 키오스크 토큰 재설정
+- 유선 LAN 설정
+  - DHCP 자동
+  - 고정 IP(IP/CIDR, 게이트웨이, DNS)
 - Wi‑Fi 검색/SSID/비밀번호 입력 및 연결
   - WPA-Personal
   - WPA-Enterprise(PEAP/MSCHAPv2, ID/비밀번호)

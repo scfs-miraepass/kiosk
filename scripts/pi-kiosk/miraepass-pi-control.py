@@ -59,6 +59,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.ok(scan_wifi())
             if self.path == "/network/status":
                 return self.ok(network_status())
+            if self.path == "/ethernet/status":
+                return self.ok(ethernet_status())
             self.fail("NOT_FOUND", "unknown endpoint", 404)
         except PermissionError as exc:
             self.fail("UNAUTHORIZED", str(exc), 401)
@@ -77,6 +79,8 @@ class Handler(BaseHTTPRequestHandler):
                         identity=str(body.get("identity", "")),
                     )
                 )
+            if self.path == "/ethernet/config":
+                return self.ok(configure_ethernet(body))
             if self.path == "/admin/verify":
                 return self.ok(verify_admin(str(body.get("pin", ""))))
             if self.path == "/terminal/run":
@@ -193,6 +197,78 @@ def network_status() -> dict[str, Any]:
         "addresses": shell("ip -br addr").stdout,
         "routes": shell("ip route").stdout,
     }
+
+
+def ethernet_device() -> str | None:
+    proc = run(["nmcli", "-t", "-f", "DEVICE,TYPE", "device", "status"], timeout=10)
+    for line in proc.stdout.splitlines():
+        parts = line.split(":")
+        if len(parts) >= 2 and parts[1] == "ethernet":
+            return parts[0]
+    return None
+
+
+def ethernet_connection(device: str) -> str:
+    proc = run(["nmcli", "-g", "GENERAL.CONNECTION", "device", "show", device], timeout=10)
+    con = proc.stdout.strip()
+    if con and con != "--":
+        return con
+    con = f"miraepass-wired-{device}"
+    run(["nmcli", "connection", "add", "type", "ethernet", "ifname", device, "con-name", con], timeout=15)
+    return con
+
+
+def ethernet_status() -> dict[str, Any]:
+    device = ethernet_device()
+    if not device:
+        return {"device": None, "connection": None, "state": "not_found", "addresses": "", "routes": ""}
+    con = run(["nmcli", "-g", "GENERAL.CONNECTION", "device", "show", device], timeout=10).stdout.strip()
+    state = run(["nmcli", "-g", "GENERAL.STATE", "device", "show", device], timeout=10).stdout.strip()
+    addresses = run(["nmcli", "-g", "IP4.ADDRESS", "device", "show", device], timeout=10).stdout.strip()
+    routes = run(["nmcli", "-g", "IP4.GATEWAY,IP4.DNS", "device", "show", device], timeout=10).stdout.strip()
+    return {"device": device, "connection": None if con == "--" else con, "state": state, "addresses": addresses, "routes": routes}
+
+
+def configure_ethernet(body: dict[str, Any]) -> dict[str, Any]:
+    device = ethernet_device()
+    if not device:
+        raise RuntimeError("유선 네트워크 장치를 찾을 수 없어요")
+    con = ethernet_connection(device)
+    mode = str(body.get("mode", "dhcp"))
+    if mode == "static":
+        address = str(body.get("address", "")).strip()
+        gateway = str(body.get("gateway", "")).strip()
+        dns = str(body.get("dns", "")).strip().replace(",", " ")
+        if not address:
+            raise RuntimeError("고정 IP 주소가 필요해요")
+        args = ["nmcli", "connection", "modify", con, "ipv4.method", "manual", "ipv4.addresses", address]
+        if gateway:
+            args.extend(["ipv4.gateway", gateway])
+        if dns:
+            args.extend(["ipv4.dns", dns])
+        proc = run(args, timeout=15)
+    else:
+        proc = run(
+            [
+                "nmcli",
+                "connection",
+                "modify",
+                con,
+                "ipv4.method",
+                "auto",
+                "ipv4.addresses",
+                "",
+                "ipv4.gateway",
+                "",
+                "ipv4.dns",
+                "",
+            ],
+            timeout=15,
+        )
+    if proc.returncode != 0:
+        return {"code": proc.returncode, "output": proc.stdout[-8000:]}
+    up = run(["nmcli", "connection", "up", con], timeout=30)
+    return {"code": up.returncode, "output": (proc.stdout + up.stdout)[-8000:]}
 
 
 def run_terminal(command: str) -> dict[str, Any]:
