@@ -15,16 +15,30 @@ const OPTIONS: { value: Rotation; label: string; hint: string; deg: number }[] =
 
 const labelOf = (r: Rotation) => OPTIONS.find((o) => o.value === r)?.label ?? r;
 
+/** 고를 수 있는 Chromium 확대·축소 비율. 기본은 1.25 */
+const SCALES = [0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
+const DEFAULT_SCALE = 1.25;
+const percent = (scale: number) => `${Math.round(scale * 100)}%`;
+
+/** 비율을 적용했을 때 페이지가 쓰는 화면 크기 (실제 픽셀 ÷ 비율) */
+function scaledSize(scale: number) {
+  const dpr = window.devicePixelRatio || 1;
+  return `${Math.round((window.screen.width * dpr) / scale)}×${Math.round((window.screen.height * dpr) / scale)}`;
+}
+
 /**
- * 화면 방향 설정.
+ * 화면 방향·비율 설정.
  * 방향을 바꾸면 터치 좌표도 함께 돌린다. 터치가 맞지 않아 '유지'를 못 누르는 경우를 대비해
  * 로컬 서비스가 15초 뒤 자동으로 이전 방향으로 되돌린다 (페이지가 멈춰도 동작).
+ * 비율은 Chromium 시작 옵션이라, 바꾸면 로컬 서비스가 키오스크 화면을 다시 시작한다.
  */
 export function DisplaySection({ disabled }: { disabled: boolean }) {
   const [status, setStatus] = useState<DisplayStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<NoticeState>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [scaleConfirm, setScaleConfirm] = useState<number | null>(null);
+  const [restarting, setRestarting] = useState(false);
 
   const update = useCallback((next: DisplayStatus) => {
     setStatus(next);
@@ -89,12 +103,27 @@ export function DisplaySection({ disabled }: { disabled: boolean }) {
   const keep = () => void call("/display/confirm", {}, (s) => `화면 방향을 ‘${labelOf(s.saved)}’로 저장했어요.`);
   const revert = () => void call("/display/revert", {}, () => "이전 방향으로 되돌렸어요.");
 
+  const applyScale = async (scale: number) => {
+    setBusy(true);
+    setNotice(null);
+    try {
+      update(await localApi<DisplayStatus>("/display/scale", { method: "POST", body: JSON.stringify({ scale }) }));
+      setScaleConfirm(null);
+      setRestarting(true);
+    } catch (e) {
+      setNotice({ tone: "error", text: errorMessage(e, "화면 비율을 바꾸지 못했어요") });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const current = status?.rotation ?? null;
-  const locked = disabled || busy || !status?.available;
+  const locked = disabled || busy || restarting || !status?.available;
+  const scaleLocked = disabled || busy || restarting || !status || Boolean(pending);
 
   return (
     <>
-      <SectionHeader icon={<Monitor className="size-6" />} title="화면 방향" description="키오스크를 세로/가로로 설치한 방향에 맞게 화면과 터치를 함께 돌립니다." />
+      <SectionHeader icon={<Monitor className="size-6" />} title="화면" description="설치한 방향에 맞게 화면과 터치를 돌리고, 글자·버튼 크기(비율)를 정합니다." />
       <div className="space-y-4">
         {status && !status.available && <Notice tone="warning">화면 회전 스크립트가 설치돼 있지 않아요. 설치 스크립트를 다시 실행해 주세요.</Notice>}
         <Card title="방향 선택">
@@ -133,6 +162,55 @@ export function DisplaySection({ disabled }: { disabled: boolean }) {
             방향을 바꾼 뒤 15초 안에 ‘유지’를 누르지 않으면 자동으로 원래대로 돌아가요. 터치 위치가 맞지 않으면 그냥 기다리세요.
           </p>
         </Card>
+
+        <Card title="화면 비율 (확대·축소)">
+          <div className="grid grid-cols-4 gap-3">
+            {SCALES.map((scale) => {
+              const active = status?.scale === scale;
+              return (
+                <button
+                  key={scale}
+                  type="button"
+                  disabled={scaleLocked || active}
+                  onClick={() => setScaleConfirm(scale)}
+                  className={cn(
+                    "flex h-18 flex-col items-center justify-center rounded-2xl border-2 disabled:cursor-default",
+                    active ? "border-primary bg-primary/5 text-primary" : "border-slate-200 bg-white text-slate-900 active:bg-slate-50 disabled:opacity-50",
+                    scaleConfirm === scale && "border-amber-400 bg-amber-50",
+                  )}
+                >
+                  <span className="text-xl font-extrabold tabular-nums">{percent(scale)}</span>
+                  <span className="text-xs font-semibold text-slate-500">{active ? "현재" : scale === DEFAULT_SCALE ? "기본" : "\u00a0"}</span>
+                </button>
+              );
+            })}
+          </div>
+          {status && !SCALES.includes(status.scale) && <p className="mt-3 text-sm text-slate-500">현재 비율: {percent(status.scale)} (설치할 때 지정)</p>}
+          {scaleConfirm !== null ? (
+            <div className="mt-4 space-y-3 rounded-2xl border-2 border-amber-200 bg-amber-50 p-4">
+              <p className="text-base font-bold text-amber-900">
+                화면 비율을 {percent(scaleConfirm)}(으)로 바꿀까요? 키오스크 화면이 다시 시작되고 관리자 모드가 닫혀요. 적용하면 페이지가 {scaledSize(scaleConfirm)}{" "}
+                크기로 그려져요.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <BigButton variant="outline" onClick={() => setScaleConfirm(null)} disabled={busy}>
+                  취소
+                </BigButton>
+                <BigButton onClick={() => void applyScale(scaleConfirm)} disabled={busy}>
+                  {busy && <Loader2 className="size-5 animate-spin" />} 적용
+                </BigButton>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-4 text-sm text-slate-500">비율이 클수록 글자와 버튼이 커지고 한 화면에 보이는 내용은 줄어요. 시작 화면(네트워크 설정)에도 같이 적용돼요.</p>
+          )}
+        </Card>
+        {restarting && (
+          <Notice tone="info">
+            <Loader2 className="mr-2 inline size-5 animate-spin" />
+            키오스크 화면을 다시 시작하는 중이에요… 잠시 뒤 새 비율로 켜져요.
+          </Notice>
+        )}
         {notice && <Notice tone={notice.tone}>{notice.text}</Notice>}
       </div>
 
