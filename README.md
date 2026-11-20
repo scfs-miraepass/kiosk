@@ -74,7 +74,9 @@ sudo CLOUD_URL=https://<서버주소>/kiosk ADMIN_PIN=2580 ./scripts/kiosk-devic
 sudo reboot
 ```
 
-설치 후 키오스크 최초 등록 화면에서 터치 키보드로 기기 토큰을 입력할 수 있습니다. 기기 토큰 재설정, 유선 LAN·Wi‑Fi·화면 방향·비율·방화벽·SSH 설정, 재부팅·종료는 키오스크 화면의 숨은 관리자 모드에서 관리자 PIN을 확인한 뒤 사용할 수 있습니다. 자세한 내용은 `scripts/kiosk-device/README.md`를 보세요.
+설치 후 키오스크 최초 등록 화면에서 터치 키보드로 기기 토큰을 입력할 수 있습니다. 기기 토큰 재설정, 유선 LAN·Wi‑Fi·화면 방향·비율·방화벽·SSH 설정, 재부팅·종료, 펌웨어 업데이트는 키오스크 화면의 숨은 관리자 모드에서 관리자 PIN을 확인한 뒤 사용할 수 있습니다. 자세한 내용은 `scripts/kiosk-device/README.md`를 보세요.
+
+버전은 둘로 나눠 관리합니다. **클라이언트**(이 웹 앱, `package.json`)는 semantic-release로 `v*` 태그·GitHub 릴리스·Docker 이미지를 만들고, **펌웨어**(`scripts/kiosk-device`, `VERSION`)는 펌웨어 파일이 바뀌었을 때만 `firmware-v*` 태그로 올라가며 기기가 이 태그에서 업데이트를 받습니다. 설정은 `release.config.mjs`를 보세요.
 
 ```bash
 chromium-browser --kiosk --noerrdialogs --disable-infobars --no-first-run \

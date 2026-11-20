@@ -41,14 +41,15 @@ const formatTime = (sec?: number) => (sec ? new Date(sec * 1000).toLocaleString(
 type Watch = { requestId: string } | "existing" | null;
 
 /**
- * 기기 스크립트 업데이트.
- * 기기는 GitHub 저장소의 최신 정식 릴리스에서 스크립트를 받아 적용한다.
+ * 펌웨어(기기 스크립트) 업데이트.
+ * 기기는 GitHub 저장소의 최신 정식 펌웨어 태그(firmware-vX.Y.Z)에서 파일을 받아 적용한다.
+ * 펌웨어는 클라이언트(웹 앱)와 따로, 펌웨어 파일이 바뀌었을 때만 버전이 올라간다.
  * 적용은 별도 systemd 서비스가 하므로, 중간에 로컬 서비스가 다시 시작돼도 계속 진행된다.
  */
 export function UpdateSection({ disabled, onUpdated }: { disabled: boolean; onUpdated: () => void }) {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [check, setCheck] = useState<UpdateCheck | null>(null);
-  // 화면을 열면 바로 최신 릴리스를 확인하므로 처음엔 확인 중으로 둔다
+  // 화면을 열면 바로 최신 펌웨어를 확인하므로 처음엔 확인 중으로 둔다
   const [checking, setChecking] = useState(true);
   const [busy, setBusy] = useState(false);
   const [watch, setWatch] = useState<Watch>(null);
@@ -78,7 +79,7 @@ export function UpdateSection({ disabled, onUpdated }: { disabled: boolean; onUp
     void applyCheck(fetchCheck());
   };
 
-  // 처음 열 때 상태를 읽고 최신 릴리스가 있는지 확인한다
+  // 처음 열 때 상태를 읽고 새 펌웨어가 있는지 확인한다
   useEffect(() => {
     if (disabled) return;
     let alive = true;
@@ -170,8 +171,8 @@ export function UpdateSection({ disabled, onUpdated }: { disabled: boolean; onUp
     <>
       <SectionHeader
         icon={<Download className="size-6" />}
-        title="업데이트"
-        description="GitHub의 최신 릴리스에서 기기 스크립트를 받아 적용합니다. 설정과 네트워크는 그대로 유지돼요."
+        title="펌웨어 업데이트"
+        description="GitHub에서 최신 펌웨어를 받아 적용합니다. 설정과 네트워크는 그대로 유지돼요. 키오스크 화면(클라이언트)은 서버에서 따로 업데이트돼요."
         action={
           <BigButton variant="outline" onClick={recheck} disabled={disabled || checking || running} className="h-12 text-base">
             {checking ? <Loader2 className="size-5 animate-spin" /> : <RefreshCw className="size-5" />} 다시 확인
@@ -179,12 +180,12 @@ export function UpdateSection({ disabled, onUpdated }: { disabled: boolean; onUp
         }
       />
       <div className="space-y-4">
-        <Card title="버전">
+        <Card title="펌웨어 버전">
           <div className="space-y-4">
             <InfoGrid
               rows={[
-                ["이 기기", status ? versionLabel(status.version) : "확인 중…"],
-                ["최신 릴리스", check ? `v${check.latest}` : checking ? "확인 중…" : "확인 못 함"],
+                ["이 기기 펌웨어", status ? versionLabel(status.version) : "확인 중…"],
+                ["최신 펌웨어", check ? `v${check.latest}` : checking ? "확인 중…" : "확인 못 함"],
                 ["저장소", check?.repo ?? status?.repo ?? ""],
               ]}
             />
@@ -213,7 +214,7 @@ export function UpdateSection({ disabled, onUpdated }: { disabled: boolean; onUp
             ) : confirm ? (
               <div className="space-y-3 rounded-2xl border-2 border-amber-200 bg-amber-50 p-4">
                 <p className="text-base font-bold text-amber-900">
-                  {confirm === "update" ? `v${check?.latest} 업데이트를 적용할까요?` : `최신 릴리스(v${check?.latest})를 다시 적용할까요?`} 적용하는 동안 키오스크
+                  {confirm === "update" ? `펌웨어 v${check?.latest} 업데이트를 적용할까요?` : `최신 펌웨어(v${check?.latest})를 다시 적용할까요?`} 적용하는 동안 키오스크
                   화면이 잠깐 다시 시작될 수 있으니 주문이 없을 때 진행해 주세요.
                 </p>
                 <div className="grid grid-cols-2 gap-3">
@@ -229,7 +230,7 @@ export function UpdateSection({ disabled, onUpdated }: { disabled: boolean; onUp
               </BigButton>
             ) : (
               <BigButton variant="outline" onClick={() => setConfirm("force")} disabled={locked || !check} className="w-full text-base">
-                최신 릴리스 다시 적용
+                최신 펌웨어 다시 적용
               </BigButton>
             )}
           </div>
@@ -243,7 +244,7 @@ export function UpdateSection({ disabled, onUpdated }: { disabled: boolean; onUp
               <StatusDot tone={status ? (status.auto ? "ok" : "warn") : "off"} />
               {status ? (status.auto ? "켜짐 · 매일 새벽 3:30 전후" : "꺼짐") : "확인 중…"}
             </div>
-            <p className="text-base text-slate-600">새 릴리스가 있을 때만 적용해요. 그 시간에 기기가 꺼져 있었으면 다음에 켤 때 확인합니다.</p>
+            <p className="text-base text-slate-600">새 펌웨어가 있을 때만 적용해요. 그 시간에 기기가 꺼져 있었으면 다음에 켤 때 확인합니다.</p>
             <InfoGrid
               rows={[
                 ["다음 확인", status?.auto ? status.nextRun || "-" : "-"],

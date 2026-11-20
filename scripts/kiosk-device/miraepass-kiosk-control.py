@@ -41,7 +41,11 @@ from urllib.parse import urlsplit
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("MIRAEPASS_KIOSK_CONTROL_PORT", "8765"))
 # 설치한 키오스크 저장소 버전 (install.sh가 package.json·git 커밋에서 읽어 기록. 예: "1.1.1+a1b2c3d")
+# 펌웨어(이 기기 스크립트) 버전. 클라이언트(웹 앱) 버전과 따로 올라간다.
 VERSION = os.environ.get("MIRAEPASS_KIOSK_VERSION", "").strip() or "unknown"
+# 펌웨어 버전이 따로 생기기 전의 업데이트(클라이언트 릴리스 태그)로 설치된 기기. VERSION이 클라이언트 버전이라
+# 펌웨어 버전과 비교할 수 없으므로, 최신 펌웨어를 무조건 받는다. (install.sh가 표시해 둔다)
+VERSION_LEGACY = os.environ.get("MIRAEPASS_KIOSK_VERSION_LEGACY") == "1"
 ADMIN_PIN = os.environ.get("MIRAEPASS_KIOSK_ADMIN_PIN", "2580")
 ALLOW_POWER = os.environ.get("MIRAEPASS_KIOSK_ALLOW_POWER") == "1"
 KIOSK_URL = os.environ.get("MIRAEPASS_KIOSK_URL", "")
@@ -1052,8 +1056,9 @@ def power_action(action: str) -> dict[str, Any]:
 
 # ───────────────────────── 업데이트 ─────────────────────────
 #
-# 기기 스크립트는 GitHub 저장소의 최신 정식 릴리스(태그)에서 받는다. (dev 프리릴리스는 받지 않는다)
-#   1) releases/latest 로 최신 버전만 확인 (작은 요청 하나) → 기기보다 높을 때만
+# 펌웨어(scripts/kiosk-device)는 GitHub 저장소의 최신 정식 펌웨어 태그(firmware-vX.Y.Z)에서 받는다.
+# 펌웨어 태그는 펌웨어 파일이 바뀌었을 때만 올라간다. 클라이언트 릴리스(vX.Y.Z)·dev 프리릴리스는 받지 않는다.
+#   1) firmware-v* 태그 목록으로 최신 버전만 확인 (작은 요청 하나) → 기기보다 높을 때만
 #   2) 그 태그의 scripts/kiosk-device 파일을 git blob API로 받아 해시로 검증
 #      (raw.githubusercontent.com은 인증서 체인이 달라 일부 기기·망에서 검증에 실패하므로 api.github.com만 쓴다)
 #   3) 받은 install.sh --update 로 적용. 실패하면 백업으로 되돌린다.
@@ -1061,6 +1066,7 @@ def power_action(action: str) -> dict[str, Any]:
 
 UPDATE_REPO = os.environ.get("MIRAEPASS_KIOSK_UPDATE_REPO", "").strip() or "scfs-miraepass/kiosk"
 GITHUB_API = os.environ.get("MIRAEPASS_KIOSK_GITHUB_API", "https://api.github.com").rstrip("/")
+FIRMWARE_TAG_PREFIX = "firmware-v"
 BUNDLE_PATH = "scripts/kiosk-device"
 UPDATE_UNIT = "miraepass-kiosk-update.service"
 UPDATE_TIMER = "miraepass-kiosk-update.timer"
@@ -1173,15 +1179,36 @@ def _http_json(url: str) -> Any:
     return json.loads(_http_get(url).decode("utf-8"))
 
 
-def latest_release() -> dict[str, str]:
+def pick_latest_firmware(refs: Any) -> dict[str, str] | None:
+    """태그 목록(git matching-refs 응답)에서 가장 높은 정식 펌웨어 버전을 고른다. dev 프리릴리스는 뺀다."""
+    best: dict[str, str] | None = None
+    for item in refs if isinstance(refs, list) else []:
+        ref = str(item.get("ref", "")) if isinstance(item, dict) else ""
+        tag = ref.removeprefix("refs/tags/")
+        if not tag.startswith(FIRMWARE_TAG_PREFIX):
+            continue
+        version = tag[len(FIRMWARE_TAG_PREFIX) :]
+        parsed = parse_version(version)
+        if not parsed or parsed[1] or version.startswith("v"):
+            continue
+        if best is None or version_newer(version, best["version"]):
+            best = {"tag": tag, "version": version}
+    return best
+
+
+def latest_firmware() -> dict[str, str]:
     try:
-        data = _http_json(f"{GITHUB_API}/repos/{UPDATE_REPO}/releases/latest")
+        refs = _http_json(f"{GITHUB_API}/repos/{UPDATE_REPO}/git/matching-refs/tags/{FIRMWARE_TAG_PREFIX}")
     except FileNotFoundError:
-        raise RuntimeError(f"{UPDATE_REPO} 저장소에서 릴리스를 찾지 못했어요") from None
-    tag = str(data.get("tag_name", "")) if isinstance(data, dict) else ""
-    if not parse_version(tag):
-        raise RuntimeError(f"최신 릴리스 태그를 해석하지 못했어요: {tag!r}")
-    return {"tag": tag, "version": tag.lstrip("v")}
+        raise RuntimeError(f"{UPDATE_REPO} 저장소를 찾지 못했어요") from None
+    latest = pick_latest_firmware(refs)
+    if not latest:
+        raise RuntimeError(f"{UPDATE_REPO} 저장소에 펌웨어 릴리스({FIRMWARE_TAG_PREFIX}*)가 아직 없어요")
+    return latest
+
+
+def firmware_update_available(latest: str) -> bool:
+    return VERSION_LEGACY or version_newer(latest, VERSION)
 
 
 def git_blob_sha(content: bytes) -> str:
@@ -1189,13 +1216,13 @@ def git_blob_sha(content: bytes) -> str:
     return hashlib.sha1(b"blob %d\0" % len(content) + content).hexdigest()
 
 
-def download_release_files(tag: str, dest: str) -> list[str]:
+def download_firmware_files(tag: str, dest: str) -> list[str]:
     try:
         listing = _http_json(f"{GITHUB_API}/repos/{UPDATE_REPO}/contents/{BUNDLE_PATH}?ref={urllib.parse.quote(tag)}")
     except FileNotFoundError:
-        raise RuntimeError(f"{tag} 릴리스에는 기기 스크립트({BUNDLE_PATH})가 없어요") from None
+        raise RuntimeError(f"{tag}에 펌웨어 파일({BUNDLE_PATH})이 없어요") from None
     if not isinstance(listing, list):
-        raise RuntimeError("기기 스크립트 목록을 받지 못했어요")
+        raise RuntimeError("펌웨어 파일 목록을 받지 못했어요")
     names = []
     for item in listing:
         name = str(item.get("name", ""))
@@ -1219,7 +1246,7 @@ def download_release_files(tag: str, dest: str) -> list[str]:
         os.chmod(path, 0o755 if name.endswith((".sh", ".py")) else 0o644)
         names.append(name)
     if "install.sh" not in names:
-        raise RuntimeError(f"{tag} 릴리스에 install.sh가 없어요")
+        raise RuntimeError(f"{tag}에 install.sh가 없어요")
     return names
 
 
@@ -1281,8 +1308,8 @@ def update_status() -> dict[str, Any]:
 
 
 def check_update() -> dict[str, Any]:
-    release = latest_release()
-    return {"current": VERSION, "latest": release["version"], "updateAvailable": version_newer(release["version"], VERSION), "repo": UPDATE_REPO}
+    firmware = latest_firmware()
+    return {"current": VERSION, "latest": firmware["version"], "updateAvailable": firmware_update_available(firmware["version"]), "repo": UPDATE_REPO}
 
 
 def request_update(force: bool) -> dict[str, Any]:
@@ -1394,21 +1421,30 @@ def run_update() -> int:
 
         backed_up = False
         try:
-            step("checking", f"GitHub({UPDATE_REPO})에서 최신 릴리스를 확인하고 있어요")
-            release = latest_release()
-            if not force and not version_newer(release["version"], VERSION):
-                step("uptodate", f"이미 최신 버전이에요 (기기 v{VERSION}, 최신 릴리스 v{release['version']})")
+            step("checking", f"GitHub({UPDATE_REPO})에서 최신 펌웨어를 확인하고 있어요")
+            release = latest_firmware()
+            if not force and not firmware_update_available(release["version"]):
+                step("uptodate", f"이미 최신 펌웨어예요 (기기 v{VERSION}, 최신 펌웨어 v{release['version']})")
                 return 0
 
-            step("downloading", f"v{release['version']} 파일을 받는 중이에요")
+            step("downloading", f"펌웨어 v{release['version']} 파일을 받는 중이에요")
             shutil.rmtree(stage, ignore_errors=True)
             os.makedirs(stage)
-            download_release_files(release["tag"], stage)
+            download_firmware_files(release["tag"], stage)
+            # install.sh는 같은 폴더의 VERSION 파일로 버전을 정한다. 태그와 다르면 적용 후 확인에서 실패하므로 미리 막는다.
+            try:
+                with open(os.path.join(stage, "VERSION"), encoding="utf-8") as f:
+                    staged_version = f.read().strip()
+            except FileNotFoundError:
+                staged_version = ""
+            if staged_version != release["version"]:
+                raise RuntimeError(f"{release['tag']}의 VERSION 파일({staged_version or '없음'})이 태그 버전과 달라요")
 
-            step("installing", f"v{release['version']} 적용 중이에요 (화면이 다시 시작될 수 있어요)")
+            step("installing", f"펌웨어 v{release['version']} 적용 중이에요 (화면이 다시 시작될 수 있어요)")
             _backup_deployed(backup)
             backed_up = True
-            env = {**os.environ, "KIOSK_VERSION": release["version"]}
+            # KIOSK_VERSION을 넘기면 install.sh가 이전 방식 업데이트로 보므로 넘기지 않는다
+            env = {k: v for k, v in os.environ.items() if k != "KIOSK_VERSION"}
             proc = subprocess.run(["bash", os.path.join(stage, "install.sh"), "--update"], stdout=log, stderr=subprocess.STDOUT, env=env, timeout=900, check=False)
             if proc.returncode != 0:
                 raise RuntimeError(f"install.sh --update 실패 (종료 코드 {proc.returncode})")
@@ -1416,7 +1452,7 @@ def run_update() -> int:
                 raise RuntimeError("업데이트 후 로컬 서비스가 새 버전으로 응답하지 않아요")
             backed_up = False
             _write_status(toVersion=release["version"])
-            step("done", f"v{release['version']}(으)로 업데이트했어요")
+            step("done", f"펌웨어 v{release['version']}(으)로 업데이트했어요")
             return 0
         except BaseException as exc:  # 시간 초과·중단 포함: 적용을 시작했다면 반드시 되돌린다
             detail = "시간이 너무 오래 걸려 중단했어요" if isinstance(exc, subprocess.TimeoutExpired) else str(exc) or exc.__class__.__name__

@@ -27,6 +27,7 @@ jobs:
     if: ${{ !inputs.manual_version && !(github.ref == 'refs/heads/dev' && github.event.forced && endsWith(github.actor, '[bot]')) }}
     outputs:
       new_version: ${{ steps.extract.outputs.NEW_VERSION }}
+      firmware_version: ${{ steps.extract.outputs.FIRMWARE_VERSION }}
     steps:
       # 브랜치 규칙을 우회할 수 있는 GitHub App 토큰으로 릴리스 커밋을 푸시합니다.
       - name: Generate release token
@@ -74,11 +75,36 @@ jobs:
           touch build.env
           yarn semantic-release
 
+      # 펌웨어(scripts/kiosk-device)는 클라이언트와 따로 버전을 올립니다 (펌웨어 파일이 바뀐 커밋이 있을 때만).
+      # 태그 firmware-vX.Y.Z만 만들고, 기기는 이 태그에서 업데이트를 받습니다. 설정은 release.config.mjs 참고.
+      - name: Run semantic-release (firmware)
+        env:
+          RELEASE_TARGET: firmware
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          GIT_AUTHOR_NAME: ${{ steps.bot.outputs.name }}
+          GIT_AUTHOR_EMAIL: ${{ steps.bot.outputs.email }}
+          GIT_COMMITTER_NAME: ${{ steps.bot.outputs.name }}
+          GIT_COMMITTER_EMAIL: ${{ steps.bot.outputs.email }}
+        run: |
+          touch firmware.env
+          # 펌웨어 태그가 하나도 없으면(처음 한 번) 지금까지 기기에 배포된 버전(VERSION 파일)을 첫 태그로 남겨 그 뒤로 이어서 올립니다.
+          # 없으면 semantic-release가 1.0.0부터 시작해, 이미 더 높은 버전이 설치된 기기가 업데이트를 받지 못합니다.
+          if [ -z "$(git tag --list 'firmware-v*')" ]; then
+            BASE=$(git log -1 --format=%H -- scripts/kiosk-device/VERSION)
+            SEED=$(git show "$BASE:scripts/kiosk-device/VERSION" | tr -d '[:space:]')
+            git tag "firmware-v$SEED" "$BASE"
+            git push origin "refs/tags/firmware-v$SEED"
+            echo "[펌웨어] 첫 태그 firmware-v$SEED 를 $(git rev-parse --short "$BASE")에 만들었습니다."
+          fi
+          yarn semantic-release
+
       - name: Export version variable
         id: extract
         run: |
           source build.env
-          echo "NEW_VERSION=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          source firmware.env
+          echo "NEW_VERSION=${NEW_VERSION:-}" >> "$GITHUB_OUTPUT"
+          echo "FIRMWARE_VERSION=${FIRMWARE_VERSION:-}" >> "$GITHUB_OUTPUT"
 
   manual-release:
     runs-on: ubuntu-latest
@@ -149,7 +175,7 @@ jobs:
     permissions:
       contents: write
     needs: [semantic-release, manual-release]
-    if: ${{ always() && github.ref == 'refs/heads/master' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.manual-release.outputs.created == 'true' || needs.semantic-release.outputs.new_version) }}
+    if: ${{ always() && github.ref == 'refs/heads/master' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.manual-release.outputs.created == 'true' || needs.semantic-release.outputs.new_version || needs.semantic-release.outputs.firmware_version) }}
     steps:
       # dev 브랜치 규칙을 우회해 강제 푸시할 수 있도록 GitHub App 토큰을 사용합니다.
       - name: Generate release token

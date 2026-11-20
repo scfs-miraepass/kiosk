@@ -38,9 +38,18 @@ describe("kiosk device updater", () => {
     expect(py<string>(`m.git_blob_sha(b"hello\\n")`)).toBe("ce013625030ba8dba906f756967f9e9ca394464a");
   });
 
-  it("기기 스크립트 VERSION 파일이 앱 버전과 같다 (릴리스할 때 함께 올라감)", () => {
-    const pkg = JSON.parse(readFileSync(path.join(process.cwd(), "package.json"), "utf8")) as { version: string };
-    expect(readFileSync(path.join(process.cwd(), "scripts", "kiosk-device", "VERSION"), "utf8").trim()).toBe(pkg.version);
+  it("펌웨어 VERSION 파일은 semver 버전이다 (펌웨어 릴리스할 때 올라감)", () => {
+    const version = readFileSync(path.join(process.cwd(), "scripts", "kiosk-device", "VERSION"), "utf8").trim();
+    expect(version).toMatch(/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
+  });
+
+  it("펌웨어 태그 중 가장 높은 정식 버전을 고른다 (클라이언트 태그·dev 프리릴리스 제외)", () => {
+    const refs = ["v9.0.0", "firmware-v1.3.0", "firmware-v1.10.0", "firmware-v1.9.2", "firmware-v2.0.0-dev.1", "firmware-vbad", "firmware-vv3.0.0"].map((tag) => ({
+      ref: `refs/tags/${tag}`,
+    }));
+    expect(py<unknown>(`m.pick_latest_firmware(${JSON.stringify(refs)})`)).toEqual({ tag: "firmware-v1.10.0", version: "1.10.0" });
+    expect(py<unknown>(`m.pick_latest_firmware([{"ref": "refs/tags/v1.0.0"}])`)).toBeNull();
+    expect(py<unknown>(`m.pick_latest_firmware({"message": "Not Found"})`)).toBeNull();
   });
 
   it.each([
