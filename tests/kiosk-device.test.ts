@@ -43,6 +43,26 @@ describe("kiosk device updater", () => {
     expect(readFileSync(path.join(process.cwd(), "scripts", "kiosk-device", "VERSION"), "utf8").trim()).toBe(pkg.version);
   });
 
+  it.each([
+    [1.25, 1.25],
+    ["1.5", 1.5],
+    [2, 2],
+    [0.5, 0.5],
+    [3.001, 3],
+    [0.4, null], // 범위 밖
+    [3.5, null],
+    ["abc", null],
+    [null, null],
+    [true, null],
+    ["nan", null],
+  ])("parse_scale(%j) = %j", (value, expected) => {
+    expect(py<number | null>(`m.parse_scale(json.loads(${JSON.stringify(JSON.stringify(value))}))`)).toBe(expected);
+  });
+
+  it("화면 비율은 세션 스크립트가 읽는 형식으로 저장한다", () => {
+    expect(py<string[]>(`[m.format_scale(x) for x in (1.25, 1.0, 1.5, 2.0, 0.75)]`)).toEqual(["1.25", "1", "1.5", "2", "0.75"]);
+  });
+
   it("README·숨김 파일·경로가 섞인 이름은 설치하지 않는다", () => {
     const names = ["install.sh", "launch.html", "README.md", ".env", "x.pyc", "../evil.sh", "a/b.sh"];
     expect(py<string[]>(`[n for n in ${JSON.stringify(names)} if m.is_bundle_file(n)]`)).toEqual(["install.sh", "launch.html"]);

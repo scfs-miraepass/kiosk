@@ -20,6 +20,7 @@
 #   KIOSK_USER      키오스크를 실행할 사용자 (기본: sudo를 실행한 사용자)
 #   WIFI_COUNTRY    Wi‑Fi 국가 코드 (기본: KR)
 #   DISPLAY_ROTATE  화면 회전: normal | left | right | inverted (기본: normal). 터치 좌표도 같이 돌린다.
+#   DISPLAY_SCALE   Chromium 확대·축소 비율 0.5~3 (기본: 1.25). 관리자 모드 › 화면에서 바꿀 수 있다.
 #   HIDE_CURSOR     1이면 마우스 커서를 숨긴다 (기본: 1, 터치 전용 기기)
 #   FIREWALL        1이면 들어오는 연결을 모두 차단하는 방화벽을 켠다 (기본: 1).
 #                   SSH가 켜져 있으면 SSH 포트는 허용된다. 관리자 모드 › 보안에서 켜고 끌 수 있다.
@@ -58,6 +59,8 @@ die() {
   exit 1
 }
 warn() { echo "    (경고) $*" >&2; }
+# Chromium 확대·축소 비율: 0.5~3, 소수 둘째 자리까지
+valid_scale() { [[ "$1" =~ ^[0-9](\.[0-9]{1,2})?$ ]] && awk -v s="$1" 'BEGIN { exit !(s >= 0.5 && s <= 3) }'; }
 
 command -v systemctl >/dev/null 2>&1 || die "systemd가 필요합니다."
 
@@ -116,6 +119,7 @@ fi
 KIOSK_USER="${KIOSK_USER:-${SUDO_USER:-pi}}"
 WIFI_COUNTRY="${WIFI_COUNTRY:-KR}"
 DISPLAY_ROTATE="${DISPLAY_ROTATE:-normal}"
+DISPLAY_SCALE="${DISPLAY_SCALE:-1.25}"
 HIDE_CURSOR="${HIDE_CURSOR:-1}"
 FIREWALL="${FIREWALL:-1}"
 NM_TAKEOVER="${NM_TAKEOVER:-0}"
@@ -137,6 +141,7 @@ case "${DISPLAY_ROTATE}" in
   normal | left | right | inverted) ;;
   *) die "DISPLAY_ROTATE는 normal | left | right | inverted 중 하나여야 합니다." ;;
 esac
+valid_scale "${DISPLAY_SCALE}" || die "DISPLAY_SCALE은 0.5~3 사이 숫자여야 합니다 (예: 1.25)."
 [[ "${FIREWALL}" =~ ^[01]$ ]] || die "FIREWALL은 0 또는 1이어야 합니다."
 [[ "${WIFI_COUNTRY}" =~ ^[A-Z]{2}$ ]] || die "WIFI_COUNTRY는 대문자 두 글자 국가 코드여야 합니다 (예: KR)."
 
@@ -183,7 +188,7 @@ echo "    기기: ${DEVICE_MODEL} · ${OS_NAME}"
 echo "    패키지 관리자: ${PKG} · 네트워크: ${NET_MANAGER}"
 echo "    사용자: ${KIOSK_USER} (${KIOSK_HOME})"
 echo "    키오스크 URL: ${CLOUD_URL}"
-echo "    Wi‑Fi 국가: ${WIFI_COUNTRY} · 화면 회전: ${DISPLAY_ROTATE} · 커서 숨김: ${HIDE_CURSOR} · 방화벽: ${FIREWALL}"
+echo "    Wi‑Fi 국가: ${WIFI_COUNTRY} · 화면 회전: ${DISPLAY_ROTATE} · 화면 비율: ${DISPLAY_SCALE} · 커서 숨김: ${HIDE_CURSOR} · 방화벽: ${FIREWALL}"
 
 # ───────────────────────── 패키지 ─────────────────────────
 
@@ -387,12 +392,15 @@ else
 conf() { sed -n "s/^$2=//p" "$1" 2>/dev/null | head -n1 | sed 's/^"//; s/"$//'; }
 CLOUD_URL="$(conf /etc/default/miraepass-kiosk KIOSK_URL)"
 DISPLAY_ROTATE="$(conf /etc/default/miraepass-kiosk DISPLAY_ROTATE)"
+DISPLAY_SCALE="$(conf /etc/default/miraepass-kiosk DISPLAY_SCALE)"
 CHROMIUM_EXTRA_FLAGS="$(conf /etc/default/miraepass-kiosk CHROMIUM_EXTRA_FLAGS)"
 ADMIN_PIN="$(conf /etc/default/miraepass-kiosk-control MIRAEPASS_KIOSK_ADMIN_PIN)"
 KIOSK_USER="$(conf "${STATE_FILE}" KIOSK_USER)"
 HIDE_CURSOR=0
 grep -q -- "-nocursor" /etc/systemd/system/miraepass-kiosk.service 2>/dev/null && HIDE_CURSOR=1
 DISPLAY_ROTATE="${DISPLAY_ROTATE:-normal}"
+# 이 설정이 생기기 전에 설치된 기기는 값이 없으므로 기본값을 쓴다
+valid_scale "${DISPLAY_SCALE}" || DISPLAY_SCALE=1.25
 NEED_REBOOT=0
 
 [[ -n "${CLOUD_URL}" && -n "${ADMIN_PIN}" && -n "${KIOSK_USER}" ]] || die "기존 설정을 읽지 못했습니다. 삭제 후 다시 설치해 주세요."
@@ -498,7 +506,7 @@ mkdir -p /etc/default
 # 사용자가 직접 추가한 줄(예: MIRAEPASS_KIOSK_ALLOWED_ORIGINS)은 업데이트해도 남긴다
 keep_extra() { grep -v -E "^($2)=" "$1" 2>/dev/null | grep -v -E '^\s*(#|$)' || true; }
 EXTRA_CONTROL_ENV="$(keep_extra /etc/default/miraepass-kiosk-control 'MIRAEPASS_KIOSK_(ADMIN_PIN|ALLOW_POWER|URL|VERSION|UPDATE_REPO|USER|ENV_FILE|ROTATE_BIN)')"
-EXTRA_KIOSK_ENV="$(keep_extra /etc/default/miraepass-kiosk 'KIOSK_URL|DISPLAY_ROTATE|CHROMIUM_EXTRA_FLAGS')"
+EXTRA_KIOSK_ENV="$(keep_extra /etc/default/miraepass-kiosk 'KIOSK_URL|DISPLAY_ROTATE|DISPLAY_SCALE|CHROMIUM_EXTRA_FLAGS')"
 cat >/etc/default/miraepass-kiosk-control <<DEFAULT
 MIRAEPASS_KIOSK_ADMIN_PIN=${ADMIN_PIN}
 MIRAEPASS_KIOSK_ALLOW_POWER=1
@@ -616,6 +624,9 @@ set -uo pipefail
 export DISPLAY="${DISPLAY:-:0}"
 export PATH="${PATH}:/snap/bin"
 ROTATE="${DISPLAY_ROTATE:-normal}"
+# 확대·축소 비율 (관리자 모드 › 화면에서 바꾸면 이 서비스가 다시 시작된다)
+SCALE="${DISPLAY_SCALE:-1.25}"
+[[ "${SCALE}" =~ ^[0-9](\.[0-9]{1,2})?$ ]] || SCALE=1.25
 START_URL="http://127.0.0.1:8765/launch"
 
 # 화면 꺼짐/절전 끄기
@@ -673,6 +684,7 @@ exec "${CHROME}" \
   --disable-features=Translate,TouchpadOverscrollHistoryNavigation,LocalNetworkAccessChecks \
   --check-for-update-interval=31536000 \
   --autoplay-policy=no-user-gesture-required \
+  --force-device-scale-factor="${SCALE}" \
   ${CHROMIUM_EXTRA_FLAGS:-} \
   "${START_URL}"
 SESSION
@@ -687,6 +699,7 @@ fi
 cat >/etc/default/miraepass-kiosk <<DEFAULT
 KIOSK_URL=${CLOUD_URL}
 DISPLAY_ROTATE=${DISPLAY_ROTATE}
+DISPLAY_SCALE=${DISPLAY_SCALE}
 CHROMIUM_EXTRA_FLAGS="${CHROMIUM_EXTRA_FLAGS}"
 DEFAULT
 [[ -n "${EXTRA_KIOSK_ENV}" ]] && echo "${EXTRA_KIOSK_ENV}" >>/etc/default/miraepass-kiosk

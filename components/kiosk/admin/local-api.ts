@@ -135,6 +135,8 @@ export type DisplayStatus = {
   /** 바꾼 뒤 '유지' 확인을 기다리는 중이면, 남은 시간이 지나면 previous로 되돌아간다 */
   pending: { rotation: Rotation; previous: Rotation; secondsLeft: number } | null;
   available: boolean;
+  /** 저장된 Chromium 확대·축소 비율 (기본 1.25). 바꾸면 키오스크 화면이 다시 시작돼 적용된다. */
+  scale: number;
 };
 
 export type SecurityStatus = {

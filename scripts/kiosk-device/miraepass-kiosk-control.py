@@ -544,36 +544,87 @@ _display_lock = threading.RLock()
 _pending: dict[str, Any] = {}  # {"rotation", "previous", "deadline", "timer"}
 
 
-def saved_rotation() -> str:
+def _env_value(name: str) -> str | None:
+    """키오스크 설정 파일(/etc/default/miraepass-kiosk)의 값. 없으면 None."""
     try:
         with open(KIOSK_ENV_FILE, encoding="utf-8") as f:
             for line in f:
                 key, _, value = line.strip().partition("=")
-                if key == "DISPLAY_ROTATE":
-                    value = value.strip().strip('"')
-                    return value if value in ROTATIONS else "normal"
+                if key == name:
+                    return value.strip().strip('"')
     except OSError:
         pass
-    return "normal"
+    return None
 
 
-def save_rotation(rotation: str) -> None:
-    """설정 파일의 DISPLAY_ROTATE만 바꾼다. 키오스크가 다시 시작돼도 이 방향으로 켜진다."""
+def _save_env_value(name: str, value: str) -> None:
+    """설정 파일의 한 값만 바꾼다. 키오스크가 다시 시작돼도 이 값으로 켜진다."""
     try:
         with open(KIOSK_ENV_FILE, encoding="utf-8") as f:
             lines = f.read().splitlines()
     except FileNotFoundError:
         lines = []
     # 줄 위치는 그대로 두고 값만 바꾼다 (없으면 끝에 추가)
-    out = [f"DISPLAY_ROTATE={rotation}" if line.startswith("DISPLAY_ROTATE=") else line for line in lines]
-    if not any(line.startswith("DISPLAY_ROTATE=") for line in lines):
-        out.append(f"DISPLAY_ROTATE={rotation}")
+    out = [f"{name}={value}" if line.startswith(f"{name}=") else line for line in lines]
+    if not any(line.startswith(f"{name}=") for line in lines):
+        out.append(f"{name}={value}")
     directory = os.path.dirname(KIOSK_ENV_FILE) or "."
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".miraepass-kiosk.")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write("\n".join(out) + "\n")
     os.chmod(tmp, 0o644)
     os.replace(tmp, KIOSK_ENV_FILE)
+
+
+def saved_rotation() -> str:
+    value = _env_value("DISPLAY_ROTATE")
+    return value if value in ROTATIONS else "normal"
+
+
+def save_rotation(rotation: str) -> None:
+    _save_env_value("DISPLAY_ROTATE", rotation)
+
+
+# Chromium 확대·축소 비율 (--force-device-scale-factor). 세션 스크립트가 DISPLAY_SCALE을 읽는다.
+SCALE_DEFAULT = 1.25
+SCALE_MIN, SCALE_MAX = 0.5, 3.0
+
+
+def parse_scale(value: Any) -> float | None:
+    """0.5~3.0 사이 숫자(소수 둘째 자리까지)만 받는다. 그 밖(문자열·NaN·범위 밖)은 None."""
+    if isinstance(value, bool):
+        return None
+    try:
+        scale = round(float(value), 2)
+    except (TypeError, ValueError):
+        return None
+    return scale if SCALE_MIN <= scale <= SCALE_MAX else None
+
+
+def format_scale(scale: float) -> str:
+    return f"{scale:.2f}".rstrip("0").rstrip(".")
+
+
+def saved_scale() -> float:
+    scale = parse_scale(_env_value("DISPLAY_SCALE"))
+    return SCALE_DEFAULT if scale is None else scale
+
+
+def set_scale(value: Any) -> dict[str, Any]:
+    """비율을 저장하고 키오스크 화면(Chromium)을 다시 시작해 적용한다."""
+    scale = parse_scale(value)
+    if scale is None:
+        raise ValueError(f"화면 비율은 {format_scale(SCALE_MIN)}~{format_scale(SCALE_MAX)} 사이여야 해요")
+    with _display_lock:
+        if _pending:
+            raise RuntimeError("화면 방향을 유지할지 먼저 정해 주세요")
+        _save_env_value("DISPLAY_SCALE", format_scale(scale))
+        status = display_status()
+    # 이 응답이 화면에 도착한 뒤에 다시 시작한다. 실행 중일 때만(try-restart) 다시 시작한다.
+    restart = threading.Timer(1.5, lambda: run(["systemctl", "try-restart", "--no-block", "miraepass-kiosk.service"], timeout=15))
+    restart.daemon = True
+    restart.start()
+    return status
 
 
 TOUCH_CONF = os.environ.get("MIRAEPASS_KIOSK_TOUCH_CONF", "/etc/X11/xorg.conf.d/99-miraepass-touch-rotation.conf")
@@ -656,6 +707,7 @@ def display_status() -> dict[str, Any]:
             "saved": saved,
             "pending": pending,
             "available": os.path.exists(ROTATE_BIN),
+            "scale": saved_scale(),
         }
 
 
@@ -1401,6 +1453,7 @@ ROUTES: dict[tuple[str, str], Any] = {
     ("POST", "/display/rotation"): lambda b: set_rotation(str(b.get("rotation", ""))),
     ("POST", "/display/confirm"): lambda b: confirm_rotation(),
     ("POST", "/display/revert"): lambda b: revert_rotation(),
+    ("POST", "/display/scale"): lambda b: set_scale(b.get("scale")),
     ("POST", "/security/firewall"): lambda b: set_firewall(bool(b.get("enabled"))),
     ("POST", "/security/ssh"): lambda b: set_ssh(bool(b.get("enabled"))),
     ("GET", "/update/status"): lambda b: update_status(),
