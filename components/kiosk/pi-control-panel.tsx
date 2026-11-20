@@ -15,6 +15,7 @@ type FocusTarget = "ssid" | "wifiPassword" | "wifiIdentity";
 
 type Props = {
   onFocusTarget: (target: FocusTarget) => void;
+  onInputBlur: () => void;
   onClose: () => void;
 };
 
@@ -28,7 +29,7 @@ async function localApi<T>(path: string, init?: RequestInit): Promise<T> {
   return json.data as T;
 }
 
-export function PiControlPanel({ onFocusTarget, onClose }: Props) {
+export function PiControlPanel({ onFocusTarget, onInputBlur, onClose }: Props) {
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
 
@@ -94,7 +95,7 @@ export function PiControlPanel({ onFocusTarget, onClose }: Props) {
           <h3 className="mb-4 flex items-center gap-2 text-lg font-extrabold">
             <Wifi className="size-5 text-primary" /> 네트워크 설정
           </h3>
-          <NetworkPanel disabled={!health} onFocusTarget={onFocusTarget} />
+          <NetworkPanel disabled={!health} onFocusTarget={onFocusTarget} onInputBlur={onInputBlur} />
         </div>
         <SystemPanel disabled={!health} onClose={onClose} />
       </div>
@@ -102,7 +103,15 @@ export function PiControlPanel({ onFocusTarget, onClose }: Props) {
   );
 }
 
-function NetworkPanel({ disabled, onFocusTarget }: { disabled: boolean; onFocusTarget: (target: FocusTarget) => void }) {
+function NetworkPanel({
+  disabled,
+  onFocusTarget,
+  onInputBlur,
+}: {
+  disabled: boolean;
+  onFocusTarget: (target: FocusTarget) => void;
+  onInputBlur: () => void;
+}) {
   const [networks, setNetworks] = useState<WifiNetwork[]>([]);
   const [ssid, setSsid] = useState("");
   const [securityMode, setSecurityMode] = useState<"personal" | "enterprise">("personal");
@@ -152,7 +161,15 @@ function NetworkPanel({ disabled, onFocusTarget }: { disabled: boolean; onFocusT
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-[1fr_auto] gap-2">
-        <Input value={ssid} onChange={(e) => setSsid(e.target.value)} onFocus={() => onFocusTarget("ssid")} placeholder="Wi‑Fi 이름(SSID)" className="h-12 text-base" disabled={disabled || loading} />
+        <Input
+          value={ssid}
+          onChange={(e) => setSsid(e.target.value)}
+          onFocus={() => onFocusTarget("ssid")}
+          onBlur={onInputBlur}
+          placeholder="Wi‑Fi 이름(SSID)"
+          className="h-12 text-base"
+          disabled={disabled || loading}
+        />
         <Button type="button" variant="outline" onClick={scan} disabled={disabled || loading} className="h-12 rounded-xl">
           {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} 검색
         </Button>
@@ -170,6 +187,7 @@ function NetworkPanel({ disabled, onFocusTarget }: { disabled: boolean; onFocusT
           value={wifiIdentity}
           onChange={(e) => setWifiIdentity(e.target.value)}
           onFocus={() => onFocusTarget("wifiIdentity")}
+          onBlur={onInputBlur}
           placeholder="Enterprise ID / 사용자 이름"
           className="h-12 text-base"
           disabled={disabled || loading}
@@ -179,6 +197,7 @@ function NetworkPanel({ disabled, onFocusTarget }: { disabled: boolean; onFocusT
         value={wifiPassword}
         onChange={(e) => setWifiPassword(e.target.value)}
         onFocus={() => onFocusTarget("wifiPassword")}
+        onBlur={onInputBlur}
         placeholder={securityMode === "enterprise" ? "Enterprise 비밀번호" : "Wi‑Fi 비밀번호 (오픈 네트워크면 비워두세요)"}
         className="h-12 text-base"
         disabled={disabled || loading}

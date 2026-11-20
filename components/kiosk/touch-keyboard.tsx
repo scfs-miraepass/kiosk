@@ -38,6 +38,7 @@ export function TouchKeyboard({ onInput, onBackspace, onEnter, onClose, targetLa
   };
 
   const startDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
     const rect = e.currentTarget.parentElement?.getBoundingClientRect();
     if (!rect) return;
     drag.current = { pointerId: e.pointerId, dx: e.clientX - rect.left, dy: e.clientY - rect.top };
@@ -134,6 +135,7 @@ function Key({
         action && "bg-blue-600 text-white shadow-lg shadow-blue-600/30",
         !active && !action && "bg-white text-slate-950 shadow-sm shadow-black/20 hover:bg-blue-50",
       )}
+      onPointerDown={(e) => e.preventDefault()}
       onClick={onClick}
       disabled={disabled}
     >

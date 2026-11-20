@@ -103,6 +103,7 @@ export function KioskSetup({
         {adminOpen ? (
           <PiControlPanel
             onFocusTarget={focus}
+            onInputBlur={() => setKeyboardOpen(false)}
             onClose={closeAdmin}
           />
         ) : (
@@ -130,6 +131,7 @@ export function KioskSetup({
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onFocus={() => focus("token")}
+          onBlur={() => setKeyboardOpen(false)}
           placeholder={changing ? "새 기기 토큰" : "기기 토큰"}
           className="h-14 text-lg"
           autoComplete="off"
