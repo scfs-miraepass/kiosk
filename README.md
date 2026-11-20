@@ -43,7 +43,7 @@ yarn dev                 # http://localhost:3000
 키오스크를 처음 열면 기기 토큰(`KIOSK_DEVICE_TOKEN`)을 입력합니다. 입력한 토큰은 그 기기의 브라우저에 저장됩니다.
 
 - **토큰을 바꿨을 때**: 서버의 `KIOSK_DEVICE_TOKEN`을 바꾸고 재시작하면, 키오스크가 켜질 때나 서버에 다시 연결될 때 토큰을 확인해서 맞지 않으면 저장된 토큰을 지우고 등록 화면을 띄웁니다. 새 토큰만 입력하면 됩니다.
-- **직접 바꾸기**: 메뉴 화면 왼쪽 위 로고(영업 종료 화면은 가운데 달 아이콘)를 5초 동안 누르면 기기 토큰 변경 화면이 열립니다. 새 토큰이 서버에서 확인돼야 바뀌므로, 취소하거나 틀린 토큰을 넣으면 기존 토큰을 그대로 씁니다. 1분 동안 입력이 없으면 주문 화면으로 돌아갑니다.
+- **직접 바꾸기**: 메뉴 화면 왼쪽 위 로고(영업 종료 화면은 가운데 달 아이콘)를 5초 동안 누르면 관리자 PIN 확인 화면이 열립니다. PIN 확인 후 관리자 모드의 **기기 토큰** 메뉴에서 새 토큰을 입력합니다. 새 토큰이 서버에서 확인돼야 바뀌므로, 틀린 토큰을 넣으면 기존 토큰을 그대로 씁니다.
 
 ### 운영 배포
 
@@ -66,6 +66,15 @@ yarn start               # NODE_ENV=production, PORT 기본 3000
 - 메뉴 이미지는 관리자 화면에서 올릴 때 긴 변 800px WebP로 줄여서 저장합니다(`lib/resize-image.ts`).
 
 Chromium은 GPU 가속을 켜고 실행하세요. (Raspberry Pi OS Bookworm은 `chromium-browser`, 이후 버전은 `chromium`)
+
+라즈베리파이 OS Lite(또는 systemd + NetworkManager를 쓰는 다른 리눅스: Debian·Ubuntu·Armbian·Fedora·Arch 등)를 새로 준비할 때는 Xorg/openbox/Chromium 자동 실행과 터치 설정용 로컬 서비스를 한 번에 설치할 수 있습니다.
+
+```bash
+sudo CLOUD_URL=https://<서버주소>/kiosk ADMIN_PIN=2580 ./scripts/kiosk-device/install.sh
+sudo reboot
+```
+
+설치 후 키오스크 최초 등록 화면에서 터치 키보드로 기기 토큰을 입력할 수 있습니다. 기기 토큰 재설정, 유선 LAN·Wi‑Fi·화면 방향·방화벽·SSH 설정, 재부팅·종료는 키오스크 화면의 숨은 관리자 모드에서 관리자 PIN을 확인한 뒤 사용할 수 있습니다. 자세한 내용은 `scripts/kiosk-device/README.md`를 보세요.
 
 ```bash
 chromium-browser --kiosk --noerrdialogs --disable-infobars --no-first-run \

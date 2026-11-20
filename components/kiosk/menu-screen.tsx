@@ -21,7 +21,7 @@ export function MenuScreen({
 }: {
   menu: CategoryDTO[];
   onHome: () => void;
-  /** 직원용 숨은 동작: 로고를 5초 동안 누르면 (짧게 누르면 처음으로) */
+  /** 직원용 숨은 동작: 로고를 5초 동안 누르면 관리자 PIN 확인 (짧게 누르면 처음으로) */
   onLogoLongPress: () => void;
 }) {
   const [activeId, setActiveId] = useAtom(activeCategoryAtom);
