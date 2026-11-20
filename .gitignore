@@ -8,3 +8,5 @@ next-env.d.ts
 data/*.db*
 .DS_Store
 dist
+
+opencode.json
