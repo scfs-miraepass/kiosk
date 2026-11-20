@@ -82,6 +82,7 @@ export function KioskSetup({
   const targetLabel: Record<FocusTarget, string> = {
     token: "키오스크 토큰",
     ssid: "Wi‑Fi 이름",
+    wifiIdentity: "Enterprise ID",
     wifiPassword: "Wi‑Fi 비밀번호",
   };
 

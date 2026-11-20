@@ -34,6 +34,8 @@ journalctl -u miraepass-pi-control -f
 키오스크 최초 등록 화면에서 기기 아이콘을 5초 이상 길게 누른 뒤 관리자 PIN을 입력하면 관리자 모드가 열립니다. 관리자 모드에서는 다음을 터치로 사용할 수 있습니다.
 
 - Wi‑Fi 검색/SSID/비밀번호 입력 및 연결
+  - WPA-Personal
+  - WPA-Enterprise(PEAP/MSCHAPv2, ID/비밀번호)
 - 키오스크로 돌아가기
 - 재부팅
 - 종료

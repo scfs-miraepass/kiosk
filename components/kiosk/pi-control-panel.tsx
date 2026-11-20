@@ -11,7 +11,7 @@ const PI_CONTROL_URL = "http://127.0.0.1:8765";
 type WifiNetwork = { ssid: string; security: string; signal: number };
 type Health = { ok: boolean; hostname?: string; user?: string; version?: string };
 
-type FocusTarget = "ssid" | "wifiPassword";
+type FocusTarget = "ssid" | "wifiPassword" | "wifiIdentity";
 
 type Props = {
   onFocusTarget: (target: FocusTarget) => void;
@@ -105,12 +105,20 @@ export function PiControlPanel({ onFocusTarget, onClose }: Props) {
 function NetworkPanel({ disabled, onFocusTarget }: { disabled: boolean; onFocusTarget: (target: FocusTarget) => void }) {
   const [networks, setNetworks] = useState<WifiNetwork[]>([]);
   const [ssid, setSsid] = useState("");
+  const [securityMode, setSecurityMode] = useState<"personal" | "enterprise">("personal");
+  const [wifiIdentity, setWifiIdentity] = useState("");
   const [wifiPassword, setWifiPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useKioskTextInput("ssid", setSsid);
+  useKioskTextInput("wifiIdentity", setWifiIdentity);
   useKioskTextInput("wifiPassword", setWifiPassword);
+
+  const selectNetwork = (network: WifiNetwork) => {
+    setSsid(network.ssid);
+    if (/802\.1X|WPA-EAP|EAP/i.test(network.security)) setSecurityMode("enterprise");
+  };
 
   const scan = async () => {
     setLoading(true);
@@ -129,7 +137,10 @@ function NetworkPanel({ disabled, onFocusTarget }: { disabled: boolean; onFocusT
     setLoading(true);
     setMessage(null);
     try {
-      await localApi("/wifi/connect", { method: "POST", body: JSON.stringify({ ssid: ssid.trim(), password: wifiPassword }) });
+      await localApi("/wifi/connect", {
+        method: "POST",
+        body: JSON.stringify({ ssid: ssid.trim(), securityMode, identity: wifiIdentity.trim(), password: wifiPassword }),
+      });
       setMessage("연결 명령을 보냈어요. 잠시 뒤 네트워크가 바뀔 수 있어요.");
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Wi‑Fi 연결에 실패했어요");
@@ -146,18 +157,36 @@ function NetworkPanel({ disabled, onFocusTarget }: { disabled: boolean; onFocusT
           {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} 검색
         </Button>
       </div>
+      <div className="grid grid-cols-2 gap-2 rounded-2xl bg-white p-1">
+        <ModeButton active={securityMode === "personal"} onClick={() => setSecurityMode("personal")} disabled={disabled || loading}>
+          WPA-Personal
+        </ModeButton>
+        <ModeButton active={securityMode === "enterprise"} onClick={() => setSecurityMode("enterprise")} disabled={disabled || loading}>
+          WPA-Enterprise
+        </ModeButton>
+      </div>
+      {securityMode === "enterprise" && (
+        <Input
+          value={wifiIdentity}
+          onChange={(e) => setWifiIdentity(e.target.value)}
+          onFocus={() => onFocusTarget("wifiIdentity")}
+          placeholder="Enterprise ID / 사용자 이름"
+          className="h-12 text-base"
+          disabled={disabled || loading}
+        />
+      )}
       <Input
         value={wifiPassword}
         onChange={(e) => setWifiPassword(e.target.value)}
         onFocus={() => onFocusTarget("wifiPassword")}
-        placeholder="Wi‑Fi 비밀번호 (오픈 네트워크면 비워두세요)"
+        placeholder={securityMode === "enterprise" ? "Enterprise 비밀번호" : "Wi‑Fi 비밀번호 (오픈 네트워크면 비워두세요)"}
         className="h-12 text-base"
         disabled={disabled || loading}
       />
       {networks.length > 0 && (
         <div className="max-h-48 space-y-2 overflow-auto rounded-2xl border p-2">
           {networks.map((n) => (
-            <button key={`${n.ssid}-${n.security}`} type="button" onClick={() => setSsid(n.ssid)} className="flex w-full items-center justify-between rounded-xl bg-slate-50 p-3 text-left hover:bg-blue-50">
+            <button key={`${n.ssid}-${n.security}`} type="button" onClick={() => selectNetwork(n)} className="flex w-full items-center justify-between rounded-xl bg-slate-50 p-3 text-left hover:bg-blue-50">
               <span className="font-semibold">{n.ssid}</span>
               <span className="text-sm text-muted-foreground">{n.signal}% · {n.security || "open"}</span>
             </button>
@@ -169,6 +198,14 @@ function NetworkPanel({ disabled, onFocusTarget }: { disabled: boolean; onFocusT
         Wi‑Fi 연결
       </Button>
     </div>
+  );
+}
+
+function ModeButton({ active, disabled, onClick, children }: { active: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <Button type="button" variant={active ? "default" : "ghost"} className="h-11 rounded-xl text-sm" onClick={onClick} disabled={disabled}>
+      {children}
+    </Button>
   );
 }
 

@@ -69,7 +69,14 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = self.read_json()
             if self.path == "/wifi/connect":
-                return self.ok(connect_wifi(str(body.get("ssid", "")), str(body.get("password", ""))))
+                return self.ok(
+                    connect_wifi(
+                        ssid=str(body.get("ssid", "")),
+                        password=str(body.get("password", "")),
+                        security_mode=str(body.get("securityMode", "personal")),
+                        identity=str(body.get("identity", "")),
+                    )
+                )
             if self.path == "/admin/verify":
                 return self.ok(verify_admin(str(body.get("pin", ""))))
             if self.path == "/terminal/run":
@@ -122,15 +129,56 @@ def scan_wifi() -> list[dict[str, Any]]:
     return networks[:30]
 
 
-def connect_wifi(ssid: str, password: str) -> dict[str, Any]:
+def connect_wifi(ssid: str, password: str, security_mode: str = "personal", identity: str = "") -> dict[str, Any]:
     ssid = ssid.strip()
     if not ssid:
         raise RuntimeError("SSID is required")
+    if security_mode == "enterprise":
+        return connect_enterprise_wifi(ssid, identity.strip(), password)
     args = ["nmcli", "device", "wifi", "connect", ssid]
     if password:
         args.extend(["password", password])
     proc = run(args, timeout=40)
     return {"code": proc.returncode, "output": proc.stdout[-8000:]}
+
+
+def connect_enterprise_wifi(ssid: str, identity: str, password: str) -> dict[str, Any]:
+    if not identity:
+        raise RuntimeError("Enterprise identity is required")
+    if not password:
+        raise RuntimeError("Enterprise password is required")
+    con_name = f"miraepass-{ssid}"
+    run(["nmcli", "connection", "delete", con_name], timeout=10)
+    add = run(
+        [
+            "nmcli",
+            "connection",
+            "add",
+            "type",
+            "wifi",
+            "ifname",
+            "*",
+            "con-name",
+            con_name,
+            "ssid",
+            ssid,
+            "wifi-sec.key-mgmt",
+            "wpa-eap",
+            "802-1x.eap",
+            "peap",
+            "802-1x.phase2-auth",
+            "mschapv2",
+            "802-1x.identity",
+            identity,
+            "802-1x.password",
+            password,
+        ],
+        timeout=20,
+    )
+    if add.returncode != 0:
+        return {"code": add.returncode, "output": add.stdout[-8000:]}
+    up = run(["nmcli", "connection", "up", con_name], timeout=40)
+    return {"code": up.returncode, "output": (add.stdout + up.stdout)[-8000:]}
 
 
 def verify_admin(pin: str) -> dict[str, Any]:
