@@ -5,8 +5,10 @@ import path from "node:path";
 import next from "next";
 import { Server } from "socket.io";
 import { seedIfEmpty } from "./lib/db/seed";
+import { recoverInterruptedPayments } from "./lib/payment-recovery";
 import { setIO, type IO } from "./lib/realtime";
 import { readSessionCookie, SESSION_COOKIE } from "./lib/session-core";
+import { parseUploadPath } from "./lib/uploads";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = Number(process.env.PORT ?? 3000);
@@ -22,20 +24,23 @@ function readCookie(header: string | undefined, name: string) {
 }
 
 const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR ?? "data/uploads");
-const MIME: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif" };
 
 /** 관리자가 올린 메뉴 이미지는 빌드 이후에 생기므로 Next public 대신 직접 서빙 */
 function serveUpload(req: IncomingMessage, res: ServerResponse) {
-  const name = path.basename(decodeURIComponent((req.url ?? "").split("?")[0].slice("/uploads/".length)));
-  const file = path.join(UPLOAD_DIR, name);
-  const type = MIME[path.extname(name).toLowerCase()];
-  if (!type || !fs.existsSync(file)) {
+  const parsed = parseUploadPath(req.url ?? "");
+  const file = parsed ? path.join(UPLOAD_DIR, parsed.name) : null;
+  if (!parsed || !file || !fs.existsSync(file)) {
     res.statusCode = 404;
     return res.end("Not found");
   }
-  res.setHeader("Content-Type", type);
+  res.setHeader("Content-Type", parsed.type);
   res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-  fs.createReadStream(file).pipe(res);
+  fs.createReadStream(file)
+    .on("error", () => {
+      if (!res.headersSent) res.statusCode = 500;
+      res.end();
+    })
+    .pipe(res);
 }
 
 let handle: ReturnType<ReturnType<typeof next>["getRequestHandler"]>;
@@ -49,6 +54,12 @@ const app = next({ dev, hostname, port, httpServer });
 app.prepare().then(() => {
   handle = app.getRequestHandler();
   if (seedIfEmpty()) console.log("> 샘플 메뉴를 생성했어요");
+  const recovered = recoverInterruptedPayments();
+  if (recovered.paymentUnknown || recovered.refundInterrupted) {
+    console.warn(
+      `> 이전 실행에서 중단된 주문을 정리했어요: 결제 확인 필요 ${recovered.paymentUnknown}건, 환불 확인 필요 ${recovered.refundInterrupted}건 (관리자 › 주문 기록)`,
+    );
+  }
 
   // destroyUpgrade:false → socket.io 외 경로(HMR 등)의 업그레이드 요청을 끊지 않음
   const io: IO = new Server(httpServer, { path: "/socket.io", serveClient: false, destroyUpgrade: false });

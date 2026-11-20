@@ -82,6 +82,18 @@ export function Dashboard() {
         <Kpi icon={XCircle} label="취소" value={s?.kpi.cancelled} suffix="건" loading={!s} />
       </div>
 
+      {s && s.kpi.paymentUnknown > 0 && (
+        <Link
+          href="/admin/orders?payment=unknown"
+          className="flex items-center gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700"
+        >
+          <AlertTriangle className="size-5 shrink-0" />
+          <span className="font-semibold">
+            결제 결과를 확인해야 하는 주문이 {s.kpi.paymentUnknown}건 있어요. 눌러서 MIRAEPASS 내역과 맞춰 주세요.
+          </span>
+        </Link>
+      )}
+
       {s && s.kpi.refundFailed > 0 && (
         <Link
           href="/admin/orders?payment=refund_failed"

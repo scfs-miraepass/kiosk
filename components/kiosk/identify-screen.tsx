@@ -8,7 +8,7 @@ import { api, ClientApiError } from "@/lib/fetcher";
 import { candidateHonorific } from "@/lib/format";
 import type { CustomerCandidate } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { cartTotalAtom, customerAtom, idempotencyKeyAtom, newIdempotencyKey, stepAtom } from "@/store/kiosk";
+import { cartAtom, customerAtom, idempotencyKeyAtom, newIdempotencyKey, stepAtom } from "@/store/kiosk";
 import { NumericKeypad } from "./numeric-keypad";
 import { StepHeader } from "./step-header";
 
@@ -19,13 +19,21 @@ export function IdentifyScreen({ onHome }: { onHome: () => void }) {
   const setStep = useSetAtom(stepAtom);
   const setCustomer = useSetAtom(customerAtom);
   const setKey = useSetAtom(idempotencyKeyAtom);
-  const total = useAtomValue(cartTotalAtom);
+  const cart = useAtomValue(cartAtom);
   const [id, setId] = useState("");
   const [insufficient, setInsufficient] = useState<CustomerCandidate | null>(null);
 
   const lookup = useMutation({
     mutationFn: (value: string) =>
-      api<CustomerCandidate>("/api/customers/lookup", { method: "POST", kiosk: true, body: { id: Number(value), amount: total } }),
+      api<CustomerCandidate>("/api/customers/lookup", {
+        method: "POST",
+        kiosk: true,
+        // 잔액 비교 금액은 서버가 장바구니로 다시 계산한다
+        body: {
+          id: Number(value),
+          items: cart.map((l) => ({ menuItemId: l.menuItemId, quantity: l.quantity, optionItemIds: l.optionItemIds })),
+        },
+      }),
     onSuccess: (c) => {
       // 잔액이 확실히 부족하면 비밀번호를 받기 전에 알려준다 (최종 판정은 결제 시점)
       if (c.sufficient === false) return setInsufficient(c);

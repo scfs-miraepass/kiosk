@@ -35,7 +35,9 @@ export const PAYMENT_LABEL: Record<PaymentStatus, string> = {
   unpaid: "미결제",
   paid: "결제 완료",
   failed: "결제 실패",
+  unknown: "결제 확인 필요",
   refunded: "환불 완료",
+  refunding: "환불 중",
   refund_failed: "환불 실패",
 };
 

@@ -1,0 +1,156 @@
+name: Sync MIRAE-PASS API Client
+
+# scfs-miraepass/MIRAE-PASS 의 api-client 를 packages/miraepass-api-client 로 동기화하고
+# 변경이 있으면 dev 브랜치로 PR 을 엽니다. (같은 브랜치를 재사용하므로 PR 은 하나만 유지됩니다.)
+on:
+  schedule:
+    # 매일 09:00 KST
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: '동기화할 MIRAE-PASS 의 브랜치·태그·커밋 (기본값: master)'
+        required: false
+        default: 'master'
+        type: string
+  # MIRAE-PASS 쪽에서 SDK 를 재생성한 뒤 바로 동기화하고 싶을 때 사용합니다.
+  #   gh api repos/<this repo>/dispatches -f event_type=miraepass-api-client-updated -F 'client_payload[ref]=master'
+  repository_dispatch:
+    types: [miraepass-api-client-updated]
+
+concurrency:
+  group: sync-api-client
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: scfs-miraepass/MIRAE-PASS
+  UPSTREAM_REF: ${{ inputs.upstream_ref || github.event.client_payload.ref || 'master' }}
+  PR_BRANCH: chore/sync-miraepass-api-client
+  PR_BASE: dev
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # PR 로 다른 워크플로우가 실행될 수 있도록 GITHUB_TOKEN 대신 GitHub App 토큰을 사용합니다.
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Get bot identity
+        id: bot
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BOT_NAME: ${{ steps.app-token.outputs.app-slug }}[bot]
+        run: |
+          BOT_ID=$(gh api "/users/$BOT_NAME" --jq .id)
+          echo "name=$BOT_NAME" >> "$GITHUB_OUTPUT"
+          echo "email=$BOT_ID+$BOT_NAME@users.noreply.github.com" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PR_BASE }}
+
+      # 이전 동기화 커밋과 비교해야 하므로 전체 이력을 받되, 파일 내용은 필요할 때만 받습니다.
+      - name: Checkout MIRAE-PASS
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.UPSTREAM_REPO }}
+          ref: ${{ env.UPSTREAM_REF }}
+          path: .upstream
+          fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: api-client
+          persist-credentials: false
+
+      - name: Sync api-client
+        id: sync
+        run: |
+          bash .github/scripts/sync-api-client.sh .upstream "$RUNNER_TEMP/sync"
+          # 루트 tsconfig 가 **/*.ts 를 포함하므로 타입 체크 전에 원본 체크아웃을 지웁니다.
+          rm -rf .upstream
+
+      - name: Setup Node.js
+        if: steps.sync.outputs.changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'yarn'
+
+      - name: Install dependencies
+        if: steps.sync.outputs.changed == 'true'
+        run: yarn install --frozen-lockfile
+
+      # 키오스크 코드가 바뀐 API 와 맞는지 확인합니다. 실패하면 PR 을 draft 로 엽니다.
+      - name: Typecheck
+        id: typecheck
+        if: steps.sync.outputs.changed == 'true'
+        continue-on-error: true
+        run: yarn typecheck 2>&1 | tee "$RUNNER_TEMP/sync/typecheck.log"; exit "${PIPESTATUS[0]}"
+
+      - name: Write PR body
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          PREV_SHA: ${{ steps.sync.outputs.prev_sha }}
+          NEW_SHA: ${{ steps.sync.outputs.new_sha }}
+          MANUAL_DIFF: ${{ steps.sync.outputs.manual_diff }}
+          TYPECHECK: ${{ steps.typecheck.outcome }}
+        run: |
+          OUT="$RUNNER_TEMP/sync"
+          UPSTREAM_URL="https://github.com/$UPSTREAM_REPO"
+          {
+            echo "[$UPSTREAM_REPO]($UPSTREAM_URL) 의 \`api-client\` 를 자동으로 동기화했습니다."
+            echo
+            echo "- 원본: \`$UPSTREAM_REF\` @ $UPSTREAM_URL/commit/$NEW_SHA"
+            echo "- 원본 변경 내역: $UPSTREAM_URL/compare/${PREV_SHA:0:7}...${NEW_SHA:0:7}"
+            echo
+            echo "### 변경 파일"
+            echo '```'
+            git diff --stat -- packages/miraepass-api-client
+            echo '```'
+            echo
+            echo "### 타입 체크"
+            if [[ "$TYPECHECK" == "success" ]]; then
+              echo "✅ \`yarn typecheck\` 통과"
+            else
+              echo "❌ \`yarn typecheck\` 실패 — 키오스크 코드를 바뀐 API 에 맞게 수정해야 합니다. (draft 로 열었습니다)"
+              echo
+              echo '<details><summary>로그</summary>'
+              echo
+              echo '```'
+              tail -n 100 "$OUT/typecheck.log"
+              echo '```'
+              echo '</details>'
+            fi
+            if [[ "$MANUAL_DIFF" == "true" ]]; then
+              echo
+              echo "### ⚠️ 수동 반영 필요"
+              echo "아래 파일은 키오스크에서 수정해 쓰고 있어 자동으로 덮어쓰지 않았습니다. 원본 변경분을 확인하고 필요하면 반영해주세요."
+              echo
+              echo '```diff'
+              head -c 50000 "$OUT/manual.diff"
+              echo '```'
+            fi
+          } > "$OUT/pr-body.md"
+
+      - name: Create or update pull request
+        if: steps.sync.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: ${{ env.PR_BRANCH }}
+          base: ${{ env.PR_BASE }}
+          add-paths: packages/miraepass-api-client
+          commit-message: 'chore(api-client): MIRAE-PASS api-client 동기화 (${{ env.UPSTREAM_REF }}@${{ steps.sync.outputs.new_sha }})'
+          author: ${{ steps.bot.outputs.name }} <${{ steps.bot.outputs.email }}>
+          committer: ${{ steps.bot.outputs.name }} <${{ steps.bot.outputs.email }}>
+          title: 'chore(api-client): MIRAE-PASS api-client 동기화'
+          body-path: ${{ runner.temp }}/sync/pr-body.md
+          draft: ${{ steps.typecheck.outcome == 'failure' }}
+          delete-branch: true

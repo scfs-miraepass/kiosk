@@ -27,7 +27,9 @@ declare global {
 }
 const users = (globalThis.__mpMockUsers ??= new Map(seed.map((u) => [u.id, { ...u }])));
 
-const latency = () => new Promise((r) => setTimeout(r, 150 + Math.random() * 250));
+/** 실제 네트워크처럼 지연을 준다. 테스트에서는 MIRAEPASS_MOCK_LATENCY=0으로 끈다 */
+const latency = () =>
+  process.env.MIRAEPASS_MOCK_LATENCY === "0" ? Promise.resolve() : new Promise((r) => setTimeout(r, 150 + Math.random() * 250));
 const strip = ({ password: _password, kioskPin: _pin, ...u }: MockUser): MPUser => ({ ...u });
 
 export const mockGateway: MiraepassGateway = {
