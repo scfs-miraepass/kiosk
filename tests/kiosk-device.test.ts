@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -35,6 +36,11 @@ describe("kiosk device updater", () => {
   it("GitHub contents API와 같은 git blob 해시로 파일을 검증한다", () => {
     // `printf 'hello\\n' | git hash-object --stdin`
     expect(py<string>(`m.git_blob_sha(b"hello\\n")`)).toBe("ce013625030ba8dba906f756967f9e9ca394464a");
+  });
+
+  it("기기 스크립트 VERSION 파일이 앱 버전과 같다 (릴리스할 때 함께 올라감)", () => {
+    const pkg = JSON.parse(readFileSync(path.join(process.cwd(), "package.json"), "utf8")) as { version: string };
+    expect(readFileSync(path.join(process.cwd(), "scripts", "kiosk-device", "VERSION"), "utf8").trim()).toBe(pkg.version);
   });
 
   it("README·숨김 파일·경로가 섞인 이름은 설치하지 않는다", () => {

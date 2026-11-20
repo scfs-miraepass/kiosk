@@ -25,7 +25,7 @@
 #                   SSH가 켜져 있으면 SSH 포트는 허용된다. 관리자 모드 › 보안에서 켜고 끌 수 있다.
 #   AUTO_UPDATE     1이면 매일 새벽 자동 업데이트 (기본: 1). 관리자 모드 › 업데이트에서 켜고 끌 수 있다.
 #   CHROMIUM_EXTRA_FLAGS  Chromium 추가 플래그 (기본: 라즈베리파이는 GPU 래스터화 플래그, 그 외 없음)
-#   KIOSK_VERSION   관리자 모드에 표시할 버전 (기본: 저장소 package.json 버전 + git 커밋)
+#   KIOSK_VERSION   관리자 모드에 표시할 버전 (기본: 저장소 package.json 버전 + git 커밋, 없으면 이 폴더의 VERSION 파일)
 #   UPDATE_REPO     업데이트를 받을 GitHub 저장소 owner/repo (기본: 저장소 git remote, 없으면 scfs-miraepass/kiosk)
 #   SKIP_PACKAGES   1이면 패키지 설치를 건너뛴다 (지원하지 않는 배포판용)
 #   NM_TAKEOVER     1이면 NetworkManager가 아닌 네트워크 관리자(dhcpcd·netplan·ifupdown 등)를
@@ -375,6 +375,11 @@ if [[ "${NET_MANAGER}" == "networkmanager" ]]; then
   nmcli radio wifi on 2>/dev/null || true
 fi
 
+# 라즈베리파이는 RTC가 없어 시간 동기화가 꺼져 있으면 시간이 틀어지고, HTTPS(클라우드 화면·GitHub 업데이트)가 인증서 오류로 실패한다
+if command -v timedatectl >/dev/null 2>&1; then
+  timedatectl set-ntp true 2>/dev/null || warn "시간 자동 동기화(NTP)를 켜지 못했습니다. 시간 동기화 서비스(systemd-timesyncd·chrony 등)를 설치해 주세요."
+fi
+
 else
 
 # ───────────────────────── 기존 설정 읽기 (--update) ─────────────────────────
@@ -419,8 +424,8 @@ SCREEN_BEFORE="$(screen_digest)"
 
 fi
 
-# 설치하는 키오스크 버전: 저장소 package.json 버전 + git 커밋 (관리자 모드에 표시)
-# scripts/kiosk-device 폴더만 복사해 설치하면 알 수 없으므로 KIOSK_VERSION으로 직접 줄 수 있다.
+# 설치하는 키오스크 버전 (관리자 모드에 표시)
+#   KIOSK_VERSION → 저장소 package.json 버전 + git 커밋 → 이 폴더의 VERSION 파일 (릴리스할 때 자동으로 맞춰짐)
 REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 if [[ -z "${KIOSK_VERSION:-}" && -f "${REPO_DIR}/package.json" ]]; then
   # 다른 프로젝트의 package.json을 읽지 않도록 이름을 확인한다
@@ -434,6 +439,11 @@ if [[ -z "${KIOSK_VERSION:-}" && -f "${REPO_DIR}/package.json" ]]; then
     fi
   fi
 fi
+# scripts/kiosk-device 폴더만 복사했거나 저장소 압축 파일로 받은 경우
+if [[ -z "${KIOSK_VERSION:-}" && -f "${SCRIPT_DIR}/VERSION" ]]; then
+  KIOSK_VERSION="$(tr -d '[:space:]' <"${SCRIPT_DIR}/VERSION")"
+fi
+[[ -z "${KIOSK_VERSION:-}" || "${KIOSK_VERSION}" =~ ^[0-9A-Za-z.+-]+$ ]] || die "버전 형식이 올바르지 않습니다: ${KIOSK_VERSION}"
 KIOSK_VERSION="${KIOSK_VERSION:-unknown}"
 # 업데이트를 받을 GitHub 저장소 (owner/repo). 업데이트 때는 기존 값을 유지하고,
 # 처음 설치 때는 UPDATE_REPO → 저장소 git remote → 기본값 순으로 정한다.

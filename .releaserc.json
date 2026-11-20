@@ -9,14 +9,15 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "echo \"NEW_VERSION=${nextRelease.version}\" >> build.env && npm pkg set \"version=${nextRelease.version}\""
+        "prepareCmd": "echo \"NEW_VERSION=${nextRelease.version}\" >> build.env && npm pkg set \"version=${nextRelease.version}\" && echo \"${nextRelease.version}\" > scripts/kiosk-device/VERSION"
       }
     ],
     [
       "@semantic-release/git",
       {
         "assets": [
-          "package.json"
+          "package.json",
+          "scripts/kiosk-device/VERSION"
         ],
         "message": "chore(release): ${nextRelease.version} [skip ci]"
       }

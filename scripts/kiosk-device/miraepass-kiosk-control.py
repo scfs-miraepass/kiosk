@@ -25,6 +25,7 @@ import re
 import secrets
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -1001,7 +1002,8 @@ def power_action(action: str) -> dict[str, Any]:
 #
 # 기기 스크립트는 GitHub 저장소의 최신 정식 릴리스(태그)에서 받는다. (dev 프리릴리스는 받지 않는다)
 #   1) releases/latest 로 최신 버전만 확인 (작은 요청 하나) → 기기보다 높을 때만
-#   2) 그 태그의 scripts/kiosk-device 파일을 받아 git blob 해시로 검증
+#   2) 그 태그의 scripts/kiosk-device 파일을 git blob API로 받아 해시로 검증
+#      (raw.githubusercontent.com은 인증서 체인이 달라 일부 기기·망에서 검증에 실패하므로 api.github.com만 쓴다)
 #   3) 받은 install.sh --update 로 적용. 실패하면 백업으로 되돌린다.
 # 적용은 miraepass-kiosk-update.service(별도 프로세스)가 한다. 적용 중 로컬 서비스가 재시작돼도 끊기지 않게 하기 위해서다.
 
@@ -1085,19 +1087,38 @@ def version_newer(latest: str, current: str) -> bool:
     return _compare_pre(lv[1], cv[1]) > 0
 
 
-def _http_json(url: str) -> Any:
-    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": f"miraepass-kiosk-device/{VERSION}"})
+def _tls_error(exc: ssl.SSLCertVerificationError) -> str:
+    """인증서 오류를 원인과 함께 설명한다. 라즈베리파이는 RTC가 없어 시간이 틀리면 인증서가 '아직 유효하지 않음'으로 실패한다."""
+    reason = getattr(exc, "verify_message", "") or str(exc)
+    now = time.strftime("%Y-%m-%d %H:%M")
+    if getattr(exc, "verify_code", 0) in (9, 10):  # X509_V_ERR_CERT_NOT_YET_VALID, X509_V_ERR_CERT_HAS_EXPIRED
+        return f"GitHub 인증서를 확인하지 못했어요 ({reason}). 기기 시간({now})이 맞는지 확인해 주세요"
+    return f"GitHub 인증서를 확인하지 못했어요 ({reason}, 기기 시간 {now}). 망에서 HTTPS를 가로채는지, ca-certificates가 설치돼 있는지 확인해 주세요"
+
+
+def _http_get(url: str, accept: str = "application/vnd.github+json", timeout: int = 30) -> bytes:
+    req = urllib.request.Request(url, headers={"Accept": accept, "X-GitHub-Api-Version": "2022-11-28", "User-Agent": f"miraepass-kiosk-device/{VERSION}"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as res:
-            return json.loads(res.read().decode("utf-8"))
+        with urllib.request.urlopen(req, timeout=timeout) as res:
+            return res.read()
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             raise FileNotFoundError(url) from None
         if exc.code == 403:
             raise RuntimeError("GitHub 요청 한도를 넘었어요. 잠시 뒤 다시 시도해 주세요") from None
         raise RuntimeError(f"GitHub 요청에 실패했어요 (HTTP {exc.code})") from None
+    except urllib.error.URLError as exc:
+        if isinstance(exc.reason, ssl.SSLCertVerificationError):
+            raise RuntimeError(_tls_error(exc.reason)) from None
+        raise RuntimeError(f"GitHub에 연결하지 못했어요: {exc.reason}") from None
+    except ssl.SSLCertVerificationError as exc:
+        raise RuntimeError(_tls_error(exc)) from None
     except Exception as exc:
         raise RuntimeError(f"GitHub에 연결하지 못했어요: {exc}") from None
+
+
+def _http_json(url: str) -> Any:
+    return json.loads(_http_get(url).decode("utf-8"))
 
 
 def latest_release() -> dict[str, str]:
@@ -1128,16 +1149,17 @@ def download_release_files(tag: str, dest: str) -> list[str]:
         name = str(item.get("name", ""))
         if item.get("type") != "file" or not is_bundle_file(name):
             continue
-        url = str(item.get("download_url") or "")
-        if not url.startswith("https://"):
-            raise RuntimeError(f"다운로드 주소가 올바르지 않아요: {name}")
-        req = urllib.request.Request(url, headers={"User-Agent": f"miraepass-kiosk-device/{VERSION}"})
+        sha = str(item.get("sha", ""))
+        if not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise RuntimeError(f"파일 정보가 올바르지 않아요: {name}")
+        # download_url(raw.githubusercontent.com) 대신 같은 api.github.com에서 해시로 받는다
         try:
-            with urllib.request.urlopen(req, timeout=60) as res:
-                content = res.read()
-        except Exception as exc:
+            content = _http_get(f"{GITHUB_API}/repos/{UPDATE_REPO}/git/blobs/{sha}", accept="application/vnd.github.raw+json", timeout=60)
+        except FileNotFoundError:
+            raise RuntimeError(f"{name}을(를) 받지 못했어요") from None
+        except RuntimeError as exc:
             raise RuntimeError(f"{name}을(를) 받지 못했어요: {exc}") from None
-        if git_blob_sha(content) != item.get("sha"):
+        if git_blob_sha(content) != sha:
             raise RuntimeError(f"받은 파일이 손상됐어요: {name}")
         path = os.path.join(dest, name)
         with open(path, "wb") as f:
