@@ -70,11 +70,11 @@ Chromium은 GPU 가속을 켜고 실행하세요. (Raspberry Pi OS Bookworm은 `
 라즈베리파이 OS Lite(또는 systemd + NetworkManager를 쓰는 다른 리눅스: Debian·Ubuntu·Armbian·Fedora·Arch 등)를 새로 준비할 때는 Xorg/openbox/Chromium 자동 실행과 터치 설정용 로컬 서비스를 한 번에 설치할 수 있습니다.
 
 ```bash
-sudo CLOUD_URL=https://<서버주소>/kiosk ADMIN_PIN=2580 ./scripts/pi-kiosk/install.sh
+sudo CLOUD_URL=https://<서버주소>/kiosk ADMIN_PIN=2580 ./scripts/kiosk-device/install.sh
 sudo reboot
 ```
 
-설치 후 키오스크 최초 등록 화면에서 터치 키보드로 기기 토큰을 입력할 수 있습니다. 기기 토큰 재설정, 유선 LAN·Wi‑Fi 설정, 재부팅·종료는 키오스크 화면의 숨은 관리자 모드에서 관리자 PIN을 확인한 뒤 사용할 수 있습니다. 자세한 내용은 `scripts/pi-kiosk/README.md`를 보세요.
+설치 후 키오스크 최초 등록 화면에서 터치 키보드로 기기 토큰을 입력할 수 있습니다. 기기 토큰 재설정, 유선 LAN·Wi‑Fi 설정, 재부팅·종료는 키오스크 화면의 숨은 관리자 모드에서 관리자 PIN을 확인한 뒤 사용할 수 있습니다. 자세한 내용은 `scripts/kiosk-device/README.md`를 보세요.
 
 ```bash
 chromium-browser --kiosk --noerrdialogs --disable-infobars --no-first-run \

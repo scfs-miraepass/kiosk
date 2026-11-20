@@ -1,8 +1,8 @@
 /**
- * 키오스크 기기의 로컬 제어 서비스(scripts/pi-kiosk/miraepass-pi-control.py) 호출.
+ * 키오스크 기기의 로컬 제어 서비스(scripts/kiosk-device/miraepass-kiosk-control.py) 호출.
  * 클라우드 페이지가 키오스크 기기(라즈베리파이 등 리눅스)의 Chromium 안에서 열릴 때만 127.0.0.1로 닿는다.
  */
-export const PI_CONTROL_URL = "http://127.0.0.1:8765";
+export const KIOSK_CONTROL_URL = "http://127.0.0.1:8765";
 
 export class LocalApiError extends Error {
   constructor(
@@ -19,7 +19,7 @@ export async function localApi<T>(path: string, init?: RequestInit & { timeoutMs
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   try {
-    res = await fetch(`${PI_CONTROL_URL}${path}`, {
+    res = await fetch(`${KIOSK_CONTROL_URL}${path}`, {
       ...rest,
       cache: "no-store",
       signal: controller.signal,
@@ -82,3 +82,16 @@ export function deviceStateLabel(state: string, kind: "ethernet" | "wifi") {
   if (state === "not_found") return "장치 없음";
   return state || "알 수 없음";
 }
+
+/** xrandr 회전 방향 (left = 반시계 90°, right = 시계 90°) */
+export type Rotation = "normal" | "left" | "right" | "inverted";
+
+export type DisplayStatus = {
+  /** 지금 화면에 적용된 방향 */
+  rotation: Rotation;
+  /** 저장된 방향 (재부팅해도 유지) */
+  saved: Rotation;
+  /** 바꾼 뒤 '유지' 확인을 기다리는 중이면, 남은 시간이 지나면 previous로 되돌아간다 */
+  pending: { rotation: Rotation; previous: Rotation; secondsLeft: number } | null;
+  available: boolean;
+};

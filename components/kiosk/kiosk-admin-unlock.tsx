@@ -3,7 +3,7 @@
 import { LockKeyhole, X } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { PI_CONTROL_URL } from "./admin/local-api";
+import { KIOSK_CONTROL_URL } from "./admin/local-api";
 import { NumericKeypad } from "./numeric-keypad";
 
 export function KioskAdminUnlock({ onUnlocked, onCancel }: { onUnlocked: () => void; onCancel: () => void }) {
@@ -16,7 +16,7 @@ export function KioskAdminUnlock({ onUnlocked, onCancel }: { onUnlocked: () => v
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${PI_CONTROL_URL}/admin/verify`, {
+      const res = await fetch(`${KIOSK_CONTROL_URL}/admin/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pin: nextPin }),

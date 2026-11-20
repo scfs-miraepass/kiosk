@@ -29,8 +29,8 @@ if [[ "${EUID}" -ne 0 ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ ! -f "${SCRIPT_DIR}/miraepass-pi-control.py" ]]; then
-  echo "${SCRIPT_DIR}/miraepass-pi-control.py 가 없습니다. scripts/pi-kiosk 폴더를 통째로 복사해 주세요." >&2
+if [[ ! -f "${SCRIPT_DIR}/miraepass-kiosk-control.py" ]]; then
+  echo "${SCRIPT_DIR}/miraepass-kiosk-control.py 가 없습니다. scripts/kiosk-device 폴더를 통째로 복사해 주세요." >&2
   exit 1
 fi
 
@@ -70,12 +70,15 @@ fi
 # ───────────────────────── 설정값 ─────────────────────────
 
 # 이전 설치 값 (재설치할 때 다시 입력하지 않도록)
+# (miraepass-pi-control은 이전 이름. 예전 설치에서 올라올 때도 PIN을 이어받는다)
 PREV_URL="$(sed -n 's/^KIOSK_URL=//p' /etc/default/miraepass-kiosk 2>/dev/null || true)"
-PREV_PIN="$(sed -n 's/^MIRAEPASS_KIOSK_ADMIN_PIN=//p' /etc/default/miraepass-pi-control 2>/dev/null || true)"
+PREV_ROTATE="$(sed -n 's/^DISPLAY_ROTATE=//p' /etc/default/miraepass-kiosk 2>/dev/null || true)"
+PREV_PIN="$(sed -n 's/^MIRAEPASS_KIOSK_ADMIN_PIN=//p' /etc/default/miraepass-kiosk-control /etc/default/miraepass-pi-control 2>/dev/null | head -n1 || true)"
 
 KIOSK_USER="${KIOSK_USER:-${SUDO_USER:-pi}}"
 WIFI_COUNTRY="${WIFI_COUNTRY:-KR}"
-DISPLAY_ROTATE="${DISPLAY_ROTATE:-normal}"
+# 관리자 모드에서 바꾼 화면 방향은 재설치해도 유지한다
+DISPLAY_ROTATE="${DISPLAY_ROTATE:-${PREV_ROTATE:-normal}}"
 HIDE_CURSOR="${HIDE_CURSOR:-1}"
 NM_TAKEOVER="${NM_TAKEOVER:-0}"
 
@@ -339,17 +342,27 @@ done
 # ───────────────────────── 로컬 제어 서비스 ─────────────────────────
 
 echo "==> 로컬 제어 서비스 설치"
-install -m 0755 "${SCRIPT_DIR}/miraepass-pi-control.py" /usr/local/bin/miraepass-pi-control.py
+# 이전 이름(miraepass-pi-control)으로 설치된 서비스 정리
+if [[ -e /etc/systemd/system/miraepass-pi-control.service ]]; then
+  echo "    이전 서비스(miraepass-pi-control)를 miraepass-kiosk-control로 교체합니다"
+  systemctl disable --now miraepass-pi-control.service >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/miraepass-pi-control.service /usr/local/bin/miraepass-pi-control.py /etc/default/miraepass-pi-control
+fi
+
+install -m 0755 "${SCRIPT_DIR}/miraepass-kiosk-control.py" /usr/local/bin/miraepass-kiosk-control.py
 mkdir -p /etc/default
-cat >/etc/default/miraepass-pi-control <<DEFAULT
+cat >/etc/default/miraepass-kiosk-control <<DEFAULT
 MIRAEPASS_KIOSK_ADMIN_PIN=${ADMIN_PIN}
-MIRAEPASS_PI_ALLOW_POWER=1
+MIRAEPASS_KIOSK_ALLOW_POWER=1
 MIRAEPASS_KIOSK_URL=${CLOUD_URL}
+MIRAEPASS_KIOSK_USER=${KIOSK_USER}
+MIRAEPASS_KIOSK_ENV_FILE=/etc/default/miraepass-kiosk
+MIRAEPASS_KIOSK_ROTATE_BIN=/usr/local/bin/miraepass-kiosk-rotate
 DEFAULT
-chmod 0600 /etc/default/miraepass-pi-control
+chmod 0600 /etc/default/miraepass-kiosk-control
 
 PYTHON_BIN="$(command -v python3)"
-cat >/etc/systemd/system/miraepass-pi-control.service <<SERVICE
+cat >/etc/systemd/system/miraepass-kiosk-control.service <<SERVICE
 [Unit]
 Description=MIRAEPASS kiosk local control API
 After=NetworkManager.service
@@ -357,9 +370,9 @@ Wants=NetworkManager.service
 
 [Service]
 Type=simple
-EnvironmentFile=/etc/default/miraepass-pi-control
+EnvironmentFile=/etc/default/miraepass-kiosk-control
 Environment=PYTHONUNBUFFERED=1
-ExecStart=${PYTHON_BIN} /usr/local/bin/miraepass-pi-control.py
+ExecStart=${PYTHON_BIN} /usr/local/bin/miraepass-kiosk-control.py
 Restart=always
 RestartSec=2
 
@@ -370,6 +383,36 @@ SERVICE
 # ───────────────────────── 키오스크 세션 ─────────────────────────
 
 echo "==> 키오스크 실행 스크립트 설치"
+cat >/usr/local/bin/miraepass-kiosk-rotate <<'ROTATE'
+#!/usr/bin/env bash
+# 사용법: miraepass-kiosk-rotate normal|left|right|inverted
+# 키오스크 X 화면을 회전하고, 터치스크린 좌표도 같은 방향으로 맞춘다.
+set -uo pipefail
+ROTATE="${1:-normal}"
+export DISPLAY="${DISPLAY:-:0}"
+
+case "${ROTATE}" in
+  normal) MATRIX="1 0 0 0 1 0 0 0 1" ;;
+  left) MATRIX="0 -1 1 1 0 0 0 0 1" ;;
+  right) MATRIX="0 1 0 -1 0 1 0 0 1" ;;
+  inverted) MATRIX="-1 0 1 0 -1 1 0 0 1" ;;
+  *) echo "알 수 없는 방향: ${ROTATE}" >&2; exit 2 ;;
+esac
+
+command -v xrandr >/dev/null 2>&1 || { echo "xrandr가 없습니다" >&2; exit 1; }
+OUTPUT="$(xrandr --query 2>/dev/null | awk '/ connected/{print $1; exit}')"
+[[ -n "${OUTPUT}" ]] || { echo "연결된 화면을 찾지 못했습니다 (DISPLAY=${DISPLAY})" >&2; exit 1; }
+xrandr --output "${OUTPUT}" --rotate "${ROTATE}" || exit 1
+
+if command -v xinput >/dev/null 2>&1; then
+  while IFS= read -r dev; do
+    # shellcheck disable=SC2086
+    xinput set-prop "pointer:${dev}" "Coordinate Transformation Matrix" ${MATRIX} 2>/dev/null || true
+  done < <(xinput list --name-only 2>/dev/null | grep -i -E 'touch|ft5x06|goodix|ilitek|egalax|eeti|wacom|elan' || true)
+fi
+ROTATE
+chmod 0755 /usr/local/bin/miraepass-kiosk-rotate
+
 cat >/usr/local/bin/miraepass-kiosk-session <<'SESSION'
 #!/usr/bin/env bash
 # xinit이 실행하는 X 세션: 화면 설정 → 창 관리자 → Chromium 키오스크
@@ -385,23 +428,8 @@ xset -dpms 2>/dev/null || true
 xset s off 2>/dev/null || true
 xset s noblank 2>/dev/null || true
 
-# 화면 회전 + 터치 좌표 보정
-if [[ "${ROTATE}" != "normal" ]] && command -v xrandr >/dev/null 2>&1; then
-  OUTPUT="$(xrandr --query | awk '/ connected/{print $1; exit}')"
-  [[ -n "${OUTPUT}" ]] && xrandr --output "${OUTPUT}" --rotate "${ROTATE}" || true
-fi
-case "${ROTATE}" in
-  left) MATRIX="0 -1 1 1 0 0 0 0 1" ;;
-  right) MATRIX="0 1 0 -1 0 1 0 0 1" ;;
-  inverted) MATRIX="-1 0 1 0 -1 1 0 0 1" ;;
-  *) MATRIX="1 0 0 0 1 0 0 0 1" ;;
-esac
-if command -v xinput >/dev/null 2>&1; then
-  while IFS= read -r dev; do
-    # shellcheck disable=SC2086
-    xinput set-prop "pointer:${dev}" "Coordinate Transformation Matrix" ${MATRIX} 2>/dev/null || true
-  done < <(xinput list --name-only 2>/dev/null | grep -i -E 'touch|ft5x06|goodix|ilitek|egalax|eeti|wacom|elan' || true)
-fi
+# 화면 회전 + 터치 좌표 보정 (관리자 모드에서 바꾸면 로컬 서비스도 같은 스크립트를 쓴다)
+/usr/local/bin/miraepass-kiosk-rotate "${ROTATE}" || true
 
 # 창 관리자 (없어도 Chromium --kiosk는 동작한다)
 if command -v openbox-session >/dev/null 2>&1; then
@@ -475,8 +503,8 @@ fi
 cat >/etc/systemd/system/miraepass-kiosk.service <<SERVICE
 [Unit]
 Description=MIRAEPASS Chromium kiosk
-After=systemd-user-sessions.service miraepass-pi-control.service getty@tty1.service
-Wants=miraepass-pi-control.service
+After=systemd-user-sessions.service miraepass-kiosk-control.service getty@tty1.service
+Wants=miraepass-kiosk-control.service
 Conflicts=getty@tty1.service
 
 [Service]
@@ -512,14 +540,14 @@ fi
 systemctl set-default multi-user.target >/dev/null
 # tty1은 키오스크 화면이 쓴다 (SSH 접속에는 영향 없음)
 systemctl disable getty@tty1.service >/dev/null 2>&1 || true
-systemctl enable miraepass-pi-control.service miraepass-kiosk.service
-systemctl restart miraepass-pi-control.service
+systemctl enable miraepass-kiosk-control.service miraepass-kiosk.service
+systemctl restart miraepass-kiosk-control.service
 
 sleep 1
-if systemctl is-active --quiet miraepass-pi-control.service; then
+if systemctl is-active --quiet miraepass-kiosk-control.service; then
   echo "    로컬 제어 서비스 실행 중 (127.0.0.1:8765)"
 else
-  warn "로컬 제어 서비스가 실행되지 않았습니다: journalctl -u miraepass-pi-control -n 50"
+  warn "로컬 제어 서비스가 실행되지 않았습니다: journalctl -u miraepass-kiosk-control -n 50"
 fi
 
 echo

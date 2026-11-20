@@ -29,11 +29,11 @@ CPU는 ARM(aarch64·armhf)과 x86_64 모두 지원합니다. Chromium이나 Goog
 
 ```bash
 # 개발 PC에서: 설치 폴더를 기기로 복사
-scp -r scripts/pi-kiosk <사용자>@<기기 IP>:~/
+scp -r scripts/kiosk-device <사용자>@<기기 IP>:~/
 
 # 기기에 접속해서 설치
 ssh <사용자>@<기기 IP>
-cd ~/pi-kiosk
+cd ~/kiosk-device
 sudo CLOUD_URL=https://YOUR_DOMAIN/kiosk ADMIN_PIN=2580 ./install.sh
 sudo reboot
 ```
@@ -44,7 +44,7 @@ sudo reboot
 | `ADMIN_PIN` | `2580` | 관리자 모드를 열 때 쓰는 숫자 4~8자리 PIN. 재설치할 때 생략하면 이전 값을 씁니다. |
 | `KIOSK_USER` | sudo를 실행한 사용자 | 키오스크(Chromium)를 실행할 계정 |
 | `WIFI_COUNTRY` | `KR` | Wi‑Fi 국가 코드. Raspberry Pi OS Lite는 이 값이 없으면 무선이 막혀 있습니다. |
-| `DISPLAY_ROTATE` | `normal` | 화면 회전 `normal`·`left`·`right`·`inverted`. 터치 좌표도 함께 돌립니다. |
+| `DISPLAY_ROTATE` | `normal` | 처음 화면 방향 `normal`·`left`·`right`·`inverted`. 이후에는 관리자 모드 › 화면에서 바꿀 수 있고, 재설치해도 그 값이 유지됩니다. |
 | `HIDE_CURSOR` | `1` | `1`이면 마우스 커서를 숨깁니다 (터치 전용). |
 | `NM_TAKEOVER` | `0` | `1`이면 다음 부팅부터 NetworkManager로 전환합니다 (위 설명 참고). |
 | `SKIP_PACKAGES` | `0` | `1`이면 패키지 설치를 건너뜁니다. |
@@ -70,7 +70,10 @@ Chromium 플래그는 `/etc/default/miraepass-kiosk`의 `CHROMIUM_EXTRA_FLAGS`�
 ## 설치되는 것
 
 - `miraepass-kiosk.service`: tty1에서 Xorg → openbox → Chromium 키오스크를 자동 실행
-- `miraepass-pi-control.service`: 관리자 모드가 호출하는 로컬 설정 API (`127.0.0.1:8765`에만 바인딩)
+- `miraepass-kiosk-control.service`: 관리자 모드가 호출하는 로컬 설정 API (`127.0.0.1:8765`에만 바인딩)
+- `/usr/local/bin/miraepass-kiosk-rotate`: 화면·터치 회전 스크립트 (부팅 시와 관리자 모드에서 공통 사용)
+
+> 이전 이름(`scripts/pi-kiosk`, `miraepass-pi-control`)으로 설치한 기기는 새 스크립트로 다시 설치하면 서비스가 자동으로 교체되고 관리자 PIN도 이어집니다.
 - Chromium·Chrome 정책(`/etc/chromium/policies/managed`, `/etc/chromium-browser/policies/managed`, `/etc/opt/chrome/policies/managed`): 비밀번호 저장·번역 말풍선을 끄고, 클라우드 페이지가 `127.0.0.1` 로컬 서비스를 부를 때 권한 팝업이 뜨지 않게 허용
 
 Chromium은 먼저 로컬 시작 화면(`http://127.0.0.1:8765/launch`)을 열고, 클라우드 키오스크 주소에 연결되면 그 페이지로 이동합니다. 부팅 시 네트워크가 없으면 "네트워크에 연결되지 않았어요" 화면에서 5초마다 다시 시도합니다.
@@ -79,9 +82,9 @@ Chromium은 먼저 로컬 시작 화면(`http://127.0.0.1:8765/launch`)을 열�
 
 ```bash
 sudo systemctl restart miraepass-kiosk       # 키오스크 화면 다시 시작
-sudo systemctl restart miraepass-pi-control  # 로컬 서비스 다시 시작
+sudo systemctl restart miraepass-kiosk-control  # 로컬 서비스 다시 시작
 journalctl -u miraepass-kiosk -f
-journalctl -u miraepass-pi-control -f
+journalctl -u miraepass-kiosk-control -f
 nmcli device status                          # 네트워크 상태 확인
 ```
 
@@ -94,6 +97,7 @@ nmcli device status                          # 네트워크 상태 확인
 | 상태 | 인터넷 연결 여부, 유선/무선 IP, 기기 모델, 호스트 이름, 로컬 서비스 버전 |
 | 유선 LAN | 현재 IP·게이트웨이·DNS 확인, DHCP 자동 / 고정 IP(IP, 서브넷 마스크, 게이트웨이, DNS) |
 | Wi‑Fi | 주변 네트워크 검색, WPA-Personal / WPA-Enterprise(PEAP·MSCHAPv2) 연결, 숨겨진 네트워크 직접 입력 |
+| 화면 | 화면 방향(기본·오른쪽 90°·왼쪽 90°·180°) 변경. 터치 좌표도 함께 돌리며, 15초 안에 ‘유지’를 누르지 않으면 자동으로 되돌아감 |
 | 기기 토큰 | 키오스크 기기 토큰 재등록 (서버에서 확인된 토큰만 저장) |
 | 전원 | 키오스크 화면 새로고침, 재부팅, 종료 (확인 후 실행) |
 

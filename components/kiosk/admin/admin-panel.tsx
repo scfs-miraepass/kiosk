@@ -1,14 +1,15 @@
 "use client";
 
-import { Activity, ArrowLeft, Cable, KeyRound, Loader2, Power, RefreshCw, Settings, Wifi } from "lucide-react";
+import { Activity, ArrowLeft, Cable, KeyRound, Loader2, Monitor, Power, RefreshCw, Settings, Wifi } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useIdleTimer } from "@/hooks/use-idle-timer";
 import { cn } from "@/lib/utils";
-import { AdminKeyboardProvider, Notice, StatusDot } from "./admin/admin-ui";
-import { PowerSection, TokenSection } from "./admin/device-sections";
-import { errorMessage, type Health, localApi, type NetworkStatus } from "./admin/local-api";
-import { type AdminSection, EthernetSection, StatusSection, WifiSection } from "./admin/network-sections";
+import { AdminKeyboardProvider, Notice, StatusDot } from "./admin-ui";
+import { PowerSection, TokenSection } from "./device-sections";
+import { DisplaySection } from "./display-section";
+import { errorMessage, type Health, localApi, type NetworkStatus } from "./local-api";
+import { type AdminSection, EthernetSection, StatusSection, WifiSection } from "./network-sections";
 
 /** 관리자 모드를 열어 두고 이 시간 동안 아무 입력이 없으면 키오스크로 돌아간다 */
 const ADMIN_IDLE_SECONDS = 180;
@@ -19,6 +20,7 @@ const NAV: { id: AdminSection; label: string; icon: React.ReactNode }[] = [
   { id: "status", label: "상태", icon: <Activity className="size-6" /> },
   { id: "ethernet", label: "유선 LAN", icon: <Cable className="size-6" /> },
   { id: "wifi", label: "Wi‑Fi", icon: <Wifi className="size-6" /> },
+  { id: "display", label: "화면", icon: <Monitor className="size-6" /> },
   { id: "token", label: "기기 토큰", icon: <KeyRound className="size-6" /> },
   { id: "power", label: "전원", icon: <Power className="size-6" /> },
 ];
@@ -33,7 +35,7 @@ type Props = {
  * 키오스크 기기(라즈베리파이 등 리눅스)의 로컬 제어 서비스(127.0.0.1:8765)를 통해 네트워크·전원을 설정한다.
  * 화면 전체를 불투명하게 덮어서 뒤 키오스크 화면과 합성할 필요가 없게 했다 (Pi GPU 부담 최소화).
  */
-export function PiControlPanel({ onClose, onTokenRegistered }: Props) {
+export function KioskAdminPanel({ onClose, onTokenRegistered }: Props) {
   const [section, setSection] = useState<AdminSection>("status");
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
@@ -156,7 +158,7 @@ export function PiControlPanel({ onClose, onTokenRegistered }: Props) {
                     <Notice tone="warning">
                       {healthError ?? "로컬 서비스에 연결할 수 없어요"}
                       <span className="mt-1 block text-sm font-medium">
-                        키오스크 기기에서 <code className="rounded bg-amber-100 px-1">sudo systemctl status miraepass-pi-control</code> 로 서비스 상태를 확인해 주세요.
+                        키오스크 기기에서 <code className="rounded bg-amber-100 px-1">sudo systemctl status miraepass-kiosk-control</code> 로 서비스 상태를 확인해 주세요.
                         자동으로 다시 연결을 시도합니다.
                       </span>
                     </Notice>
@@ -174,6 +176,7 @@ export function PiControlPanel({ onClose, onTokenRegistered }: Props) {
                 {section === "status" && <StatusSection {...netProps} health={health} onNavigate={navigate} />}
                 {section === "ethernet" && <EthernetSection {...netProps} />}
                 {section === "wifi" && <WifiSection {...netProps} />}
+                {section === "display" && <DisplaySection disabled={!connected} />}
                 {section === "token" && <TokenSection onTokenRegistered={onTokenRegistered} />}
                 {section === "power" && <PowerSection health={health} />}
               </div>

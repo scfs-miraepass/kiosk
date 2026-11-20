@@ -2,8 +2,7 @@
 """Local-only control API for the MIRAEPASS kiosk touchscreen.
 
 Runs on any systemd + NetworkManager Linux (Raspberry Pi OS, Debian, Ubuntu,
-Fedora, Arch ...). The file keeps its historical "pi-control" name so existing
-installs keep working.
+Fedora, Arch ...).
 
 The cloud-hosted Next.js kiosk page calls this service through
 http://127.0.0.1:8765 from Chromium. Keep it bound to loopback only.
@@ -22,15 +21,25 @@ import platform
 import re
 import socket
 import subprocess
+import tempfile
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 HOST = "127.0.0.1"
-PORT = int(os.environ.get("MIRAEPASS_PI_CONTROL_PORT", "8765"))
-VERSION = "1.2.0"
+PORT = int(os.environ.get("MIRAEPASS_KIOSK_CONTROL_PORT", "8765"))
+VERSION = "1.3.0"
 ADMIN_PIN = os.environ.get("MIRAEPASS_KIOSK_ADMIN_PIN", "2580")
-ALLOW_POWER = os.environ.get("MIRAEPASS_PI_ALLOW_POWER") == "1"
+ALLOW_POWER = os.environ.get("MIRAEPASS_KIOSK_ALLOW_POWER") == "1"
 KIOSK_URL = os.environ.get("MIRAEPASS_KIOSK_URL", "")
+# 화면 방향: 키오스크 X 세션을 실행하는 사용자, 방향을 저장하는 설정 파일, 실제 회전 스크립트
+KIOSK_USER = os.environ.get("MIRAEPASS_KIOSK_USER", "")
+KIOSK_ENV_FILE = os.environ.get("MIRAEPASS_KIOSK_ENV_FILE", "/etc/default/miraepass-kiosk")
+ROTATE_BIN = os.environ.get("MIRAEPASS_KIOSK_ROTATE_BIN", "/usr/local/bin/miraepass-kiosk-rotate")
+X_DISPLAY = os.environ.get("MIRAEPASS_KIOSK_DISPLAY", ":0")
+# 방향을 바꾼 뒤 이 시간 안에 '유지'를 누르지 않으면 되돌린다 (터치 좌표가 틀어져도 복구되도록)
+ROTATION_CONFIRM_SECONDS = 15
 
 
 def run(args: list[str], timeout: int = 20) -> subprocess.CompletedProcess[str]:
@@ -89,10 +98,10 @@ def split_multi(value: str) -> list[str]:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "MiraepassPiControl/1.1"
+    server_version = "MiraepassKioskControl/1.3"
 
     def log_message(self, fmt: str, *args: Any) -> None:
-        print("[pi-control]", self.address_string(), fmt % args, flush=True)
+        print("[kiosk-control]", self.address_string(), fmt % args, flush=True)
 
     def end_headers(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -117,6 +126,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.ok(network_status())
             if path == "/wifi/scan":
                 return self.ok(scan_wifi())
+            if path == "/display/status":
+                return self.ok(display_status())
             if path == "/ethernet/status":
                 return self.ok(ethernet_status())
             self.fail("NOT_FOUND", "unknown endpoint", 404)
@@ -139,6 +150,12 @@ class Handler(BaseHTTPRequestHandler):
                         hidden=bool(body.get("hidden", False)),
                     )
                 )
+            if path == "/display/rotation":
+                return self.ok(set_rotation(str(body.get("rotation", ""))))
+            if path == "/display/confirm":
+                return self.ok(confirm_rotation())
+            if path == "/display/revert":
+                return self.ok(revert_rotation())
             if path == "/ethernet/config":
                 return self.ok(configure_ethernet(body))
             if path == "/admin/verify":
@@ -505,6 +522,128 @@ def configure_ethernet(body: dict[str, Any]) -> dict[str, Any]:
         lines = [line for line in up.stdout.strip().splitlines() if line.strip()]
         return {"ok": True, "activated": False, "message": f"설정은 저장했지만 연결하지 못했어요: {lines[-1] if lines else '알 수 없는 오류'}", "status": ethernet_status()}
     return {"ok": True, "activated": True, "message": "유선 네트워크 설정을 적용했어요.", "status": ethernet_status()}
+
+
+# ───────────────────────── 화면 방향 ─────────────────────────
+
+ROTATIONS = ("normal", "left", "right", "inverted")
+_display_lock = threading.RLock()
+_pending: dict[str, Any] = {}  # {"rotation", "previous", "deadline", "timer"}
+
+
+def saved_rotation() -> str:
+    try:
+        with open(KIOSK_ENV_FILE, encoding="utf-8") as f:
+            for line in f:
+                key, _, value = line.strip().partition("=")
+                if key == "DISPLAY_ROTATE":
+                    value = value.strip().strip('"')
+                    return value if value in ROTATIONS else "normal"
+    except OSError:
+        pass
+    return "normal"
+
+
+def save_rotation(rotation: str) -> None:
+    """설정 파일의 DISPLAY_ROTATE만 바꾼다. 키오스크가 다시 시작돼도 이 방향으로 켜진다."""
+    try:
+        with open(KIOSK_ENV_FILE, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except FileNotFoundError:
+        lines = []
+    out = [line for line in lines if not line.startswith("DISPLAY_ROTATE=")]
+    out.append(f"DISPLAY_ROTATE={rotation}")
+    directory = os.path.dirname(KIOSK_ENV_FILE) or "."
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".miraepass-kiosk.")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write("\n".join(out) + "\n")
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, KIOSK_ENV_FILE)
+
+
+def apply_rotation(rotation: str) -> None:
+    """키오스크 X 화면(:0)에 회전과 터치 좌표 보정을 바로 적용한다."""
+    if not os.path.exists(ROTATE_BIN):
+        raise RuntimeError("화면 회전 스크립트가 없어요. 설치 스크립트를 다시 실행해 주세요")
+    args = ["env", f"DISPLAY={X_DISPLAY}", ROTATE_BIN, rotation]
+    if KIOSK_USER and os.geteuid() == 0:
+        args = ["runuser", "-u", KIOSK_USER, "--", *args]
+    proc = run(args, timeout=15)
+    if proc.returncode != 0:
+        lines = [line for line in proc.stdout.strip().splitlines() if line.strip()]
+        raise RuntimeError(f"화면을 회전하지 못했어요: {lines[-1]}" if lines else "화면을 회전하지 못했어요")
+
+
+def _clear_pending() -> None:
+    timer = _pending.get("timer")
+    if timer:
+        timer.cancel()
+    _pending.clear()
+
+
+def _auto_revert(token: object) -> None:
+    with _display_lock:
+        if _pending.get("timer") is not token:
+            return  # 이미 유지/되돌림/다른 방향으로 바뀜
+        previous = _pending["previous"]
+        _pending.clear()
+        try:
+            apply_rotation(previous)
+            print(f"[kiosk-control] 화면 방향 확인이 없어 {previous}(으)로 되돌렸어요", flush=True)
+        except Exception as exc:  # pragma: no cover
+            print(f"[kiosk-control] 화면 방향 되돌리기 실패: {exc}", flush=True)
+
+
+def display_status() -> dict[str, Any]:
+    with _display_lock:
+        saved = saved_rotation()
+        pending = None
+        if _pending:
+            pending = {
+                "rotation": _pending["rotation"],
+                "previous": _pending["previous"],
+                "secondsLeft": max(0, round(_pending["deadline"] - time.monotonic())),
+            }
+        return {
+            "rotation": pending["rotation"] if pending else saved,
+            "saved": saved,
+            "pending": pending,
+            "available": os.path.exists(ROTATE_BIN),
+        }
+
+
+def set_rotation(rotation: str) -> dict[str, Any]:
+    if rotation not in ROTATIONS:
+        raise ValueError("화면 방향은 normal, left, right, inverted 중 하나여야 해요")
+    with _display_lock:
+        # 확인 대기 중에 또 바꾸면, 되돌릴 곳은 처음 저장돼 있던 방향 그대로
+        previous = _pending.get("previous") or saved_rotation()
+        _clear_pending()
+        apply_rotation(rotation)
+        if rotation != previous:
+            timer = threading.Timer(ROTATION_CONFIRM_SECONDS, lambda: _auto_revert(timer))
+            timer.daemon = True
+            _pending.update(rotation=rotation, previous=previous, deadline=time.monotonic() + ROTATION_CONFIRM_SECONDS, timer=timer)
+            timer.start()
+        return display_status()
+
+
+def confirm_rotation() -> dict[str, Any]:
+    with _display_lock:
+        if _pending:
+            rotation = _pending["rotation"]
+            _clear_pending()
+            save_rotation(rotation)
+        return display_status()
+
+
+def revert_rotation() -> dict[str, Any]:
+    with _display_lock:
+        if _pending:
+            previous = _pending["previous"]
+            _clear_pending()
+            apply_rotation(previous)
+        return display_status()
 
 
 # ───────────────────────── 관리자 / 시스템 ─────────────────────────

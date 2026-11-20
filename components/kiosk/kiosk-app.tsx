@@ -27,7 +27,7 @@ import { IdentifyScreen } from "./identify-screen";
 import { KioskAdminUnlock } from "./kiosk-admin-unlock";
 import { KioskSetup } from "./kiosk-setup";
 import { MenuScreen } from "./menu-screen";
-import { PiControlPanel } from "./pi-control-panel";
+import { KioskAdminPanel } from "./admin/admin-panel";
 import { PinScreen } from "./pin-screen";
 import { ReviewScreen } from "./review-screen";
 
@@ -163,7 +163,7 @@ function KioskFlow({ token }: { token: string }) {
         />
       )}
       {adminOpen && (
-        <PiControlPanel
+        <KioskAdminPanel
           onClose={() => {
             setAdminOpen(false);
             reset("attract");

@@ -16,7 +16,7 @@ import {
   type WifiStatus,
 } from "./local-api";
 
-export type AdminSection = "status" | "ethernet" | "wifi" | "token" | "power";
+export type AdminSection = "status" | "ethernet" | "wifi" | "display" | "token" | "power";
 
 type NetworkProps = {
   network: NetworkStatus | null;
