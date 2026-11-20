@@ -7,8 +7,9 @@
 #   - Fedora 등 dnf 계열, Arch 등 pacman 계열
 #   - 그 밖의 배포판: 필요한 패키지를 직접 설치한 뒤 SKIP_PACKAGES=1 로 실행
 #
-# SSH로 접속해 실행하는 것을 기준으로 한다. 다시 실행해도 안전하며(idempotent),
-# 값을 생략하면 이전 설치 값(키오스크 URL, 관리자 PIN)을 그대로 쓴다.
+# SSH로 접속해 실행하는 것을 기준으로 한다.
+# 이미 설치된 기기에서는 실행되지 않는다. 다시 설치하려면 먼저 삭제(uninstall.sh)한 뒤 실행한다.
+# 설치는 항상 아래 기본값(또는 실행할 때 준 값)으로 시작한다.
 #
 #   sudo CLOUD_URL=https://cafe.example.com/kiosk ADMIN_PIN=2580 ./install.sh
 #
@@ -17,8 +18,9 @@
 #   WIFI_COUNTRY    Wi‑Fi 국가 코드 (기본: KR)
 #   DISPLAY_ROTATE  화면 회전: normal | left | right | inverted (기본: normal). 터치 좌표도 같이 돌린다.
 #   HIDE_CURSOR     1이면 마우스 커서를 숨긴다 (기본: 1, 터치 전용 기기)
-#   FIREWALL        1이면 들어오는 연결을 모두 차단하는 방화벽을 켠다 (기본: 1, 재설치 시 이전 상태 유지).
+#   FIREWALL        1이면 들어오는 연결을 모두 차단하는 방화벽을 켠다 (기본: 1).
 #                   SSH가 켜져 있으면 SSH 포트는 허용된다. 관리자 모드 › 보안에서 켜고 끌 수 있다.
+#   CHROMIUM_EXTRA_FLAGS  Chromium 추가 플래그 (기본: 라즈베리파이는 GPU 래스터화 플래그, 그 외 없음)
 #   SKIP_PACKAGES   1이면 패키지 설치를 건너뛴다 (지원하지 않는 배포판용)
 #   NM_TAKEOVER     1이면 NetworkManager가 아닌 네트워크 관리자(dhcpcd·netplan·ifupdown 등)를
 #                   다음 부팅부터 NetworkManager로 바꾼다. 지금 연결된 SSH는 끊지 않는다.
@@ -45,6 +47,20 @@ die() {
 warn() { echo "    (경고) $*" >&2; }
 
 command -v systemctl >/dev/null 2>&1 || die "systemd가 필요합니다."
+
+# 이미 설치된 기기에서는 실행하지 않는다 (설정이 섞이지 않도록 삭제 후 기본값으로 새로 설치)
+for installed in /etc/miraepass/install-state \
+  /etc/systemd/system/miraepass-kiosk.service \
+  /etc/systemd/system/miraepass-kiosk-control.service \
+  /etc/systemd/system/miraepass-firewall.service; do
+  if [[ -e "${installed}" ]]; then
+    echo "이미 MIRAEPASS 키오스크가 설치돼 있습니다. (${installed})" >&2
+    echo "다시 설치하려면 먼저 삭제한 뒤 실행하세요:" >&2
+    echo "  sudo miraepass-kiosk-uninstall   # 또는 sudo ${SCRIPT_DIR}/uninstall.sh" >&2
+    echo "  sudo CLOUD_URL=... ${SCRIPT_DIR}/install.sh" >&2
+    exit 1
+  fi
+done
 command -v python3 >/dev/null 2>&1 || [[ "${SKIP_PACKAGES:-0}" != "1" ]] || die "python3가 필요합니다."
 
 # ───────────────────────── 기기 / 배포판 감지 ─────────────────────────
@@ -73,31 +89,20 @@ fi
 
 # ───────────────────────── 설정값 ─────────────────────────
 
-# 이전 설치 값 (재설치할 때 다시 입력하지 않도록)
-# (miraepass-pi-control은 이전 이름. 예전 설치에서 올라올 때도 PIN을 이어받는다)
-PREV_URL="$(sed -n 's/^KIOSK_URL=//p' /etc/default/miraepass-kiosk 2>/dev/null || true)"
-PREV_ROTATE="$(sed -n 's/^DISPLAY_ROTATE=//p' /etc/default/miraepass-kiosk 2>/dev/null || true)"
-PREV_PIN="$(sed -n 's/^MIRAEPASS_KIOSK_ADMIN_PIN=//p' /etc/default/miraepass-kiosk-control /etc/default/miraepass-pi-control 2>/dev/null | head -n1 || true)"
-
 KIOSK_USER="${KIOSK_USER:-${SUDO_USER:-pi}}"
 WIFI_COUNTRY="${WIFI_COUNTRY:-KR}"
-# 관리자 모드에서 바꾼 화면 방향은 재설치해도 유지한다
-DISPLAY_ROTATE="${DISPLAY_ROTATE:-${PREV_ROTATE:-normal}}"
+DISPLAY_ROTATE="${DISPLAY_ROTATE:-normal}"
 HIDE_CURSOR="${HIDE_CURSOR:-1}"
-# 방화벽: 지정하지 않으면 이전 설치 상태(관리자 모드에서 바꾼 값)를 따르고, 처음이면 켠다
-if [[ -z "${FIREWALL:-}" && -e /etc/systemd/system/miraepass-firewall.service ]]; then
-  if systemctl is-enabled --quiet miraepass-firewall.service 2>/dev/null; then FIREWALL=1; else FIREWALL=0; fi
-fi
 FIREWALL="${FIREWALL:-1}"
 NM_TAKEOVER="${NM_TAKEOVER:-0}"
 
-CLOUD_URL="${CLOUD_URL:-${PREV_URL}}"
+CLOUD_URL="${CLOUD_URL:-}"
 if [[ -z "${CLOUD_URL}" && -t 0 ]]; then
   read -rp "클라우드 키오스크 URL (예: https://cafe.example.com/kiosk): " CLOUD_URL
 fi
 [[ "${CLOUD_URL}" =~ ^https?://[^[:space:]]+$ ]] || die "CLOUD_URL이 올바르지 않습니다 (http:// 또는 https:// 로 시작): '${CLOUD_URL}'"
 
-ADMIN_PIN="${ADMIN_PIN:-${PREV_PIN}}"
+ADMIN_PIN="${ADMIN_PIN:-}"
 if [[ -z "${ADMIN_PIN}" && -t 0 ]]; then
   read -rp "관리자 모드 PIN (숫자 4~8자리, 기본 2580): " ADMIN_PIN
 fi
@@ -299,7 +304,7 @@ IFACES
 fi
 
 # ───────────────────────── 설치 전 상태 기록 (삭제 스크립트용) ─────────────────────────
-# 처음 설치할 때의 값만 남긴다. 재설치해도 덮어쓰지 않으므로 uninstall.sh가 원래대로 되돌릴 수 있다.
+# uninstall.sh가 이 기록으로 설치 전 시스템 설정을 되돌린다. 이 파일이 있으면 "설치됨"으로 본다.
 STATE_DIR=/etc/miraepass
 STATE_FILE="${STATE_DIR}/install-state"
 mkdir -p "${STATE_DIR}/backup"
@@ -375,13 +380,6 @@ done
 # ───────────────────────── 로컬 제어 서비스 ─────────────────────────
 
 echo "==> 로컬 제어 서비스 설치"
-# 이전 이름(miraepass-pi-control)으로 설치된 서비스 정리
-if [[ -e /etc/systemd/system/miraepass-pi-control.service ]]; then
-  echo "    이전 서비스(miraepass-pi-control)를 miraepass-kiosk-control로 교체합니다"
-  systemctl disable --now miraepass-pi-control.service >/dev/null 2>&1 || true
-  rm -f /etc/systemd/system/miraepass-pi-control.service /usr/local/bin/miraepass-pi-control.py /etc/default/miraepass-pi-control
-fi
-
 install -m 0755 "${SCRIPT_DIR}/miraepass-kiosk-control.py" /usr/local/bin/miraepass-kiosk-control.py
 # 로컬 시작 화면: 인터넷이 없어도 이 화면에서 유선/Wi‑Fi를 설정할 수 있다
 install -d /usr/local/share/miraepass-kiosk
@@ -537,7 +535,7 @@ SESSION
 chmod 0755 /usr/local/bin/miraepass-kiosk-session
 
 # 라즈베리파이 GPU(VideoCore)는 블록리스트를 풀어야 GPU 래스터화가 켜진다. 다른 기기는 Chromium 기본값을 쓴다.
-CHROMIUM_EXTRA_FLAGS="$(sed -n 's/^CHROMIUM_EXTRA_FLAGS=//p' /etc/default/miraepass-kiosk 2>/dev/null | tr -d '"' || true)"
+CHROMIUM_EXTRA_FLAGS="${CHROMIUM_EXTRA_FLAGS:-}"
 if [[ -z "${CHROMIUM_EXTRA_FLAGS}" && "${IS_RPI}" == "1" ]]; then
   CHROMIUM_EXTRA_FLAGS="--ignore-gpu-blocklist --enable-gpu-rasterization"
 fi
@@ -607,14 +605,6 @@ else
   "${PYTHON_BIN}" /usr/local/bin/miraepass-kiosk-control.py firewall off >/dev/null || true
 fi
 
-# 재설치: 이미 떠 있는 키오스크 화면은 새 실행 스크립트로 다시 시작한다
-KIOSK_RESTARTED=0
-if [[ "${NEED_REBOOT}" != "1" ]] && systemctl is-active --quiet miraepass-kiosk.service; then
-  echo "==> 실행 중인 키오스크 화면 다시 시작"
-  systemctl restart miraepass-kiosk.service || warn "키오스크 화면을 다시 시작하지 못했습니다"
-  KIOSK_RESTARTED=1
-fi
-
 sleep 1
 if systemctl is-active --quiet miraepass-kiosk-control.service; then
   echo "    로컬 제어 서비스 실행 중 (127.0.0.1:8765)"
@@ -631,8 +621,6 @@ echo "- 재부팅하면 Chromium 키오스크가 자동 실행됩니다: sudo re
 if [[ "${NEED_REBOOT}" == "1" ]]; then
   echo "- NetworkManager 전환은 재부팅 후 적용됩니다. 재부팅 뒤 유선 LAN은 DHCP로 연결되며,"
   echo "  IP가 바뀌어 SSH 주소가 달라질 수 있습니다. (관리자 모드 › 상태에서 IP 확인)"
-elif [[ "${KIOSK_RESTARTED}" == "1" ]]; then
-  echo "- 키오스크 화면을 새 설정으로 다시 시작했습니다"
 else
   echo "- 지금 바로 시작: sudo systemctl start miraepass-kiosk"
 fi

@@ -40,24 +40,19 @@ sudo reboot
 
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
-| `CLOUD_URL` | (필수) | 클라우드 Next 서버의 `/kiosk` 주소. 재설치할 때 생략하면 이전 값을 씁니다. |
-| `ADMIN_PIN` | `2580` | 관리자 모드를 열 때 쓰는 숫자 4~8자리 PIN. 재설치할 때 생략하면 이전 값을 씁니다. |
+| `CLOUD_URL` | (필수) | 클라우드 Next 서버의 `/kiosk` 주소 |
+| `ADMIN_PIN` | `2580` | 관리자 모드를 열 때 쓰는 숫자 4~8자리 PIN |
 | `KIOSK_USER` | sudo를 실행한 사용자 | 키오스크(Chromium)를 실행할 계정 |
 | `WIFI_COUNTRY` | `KR` | Wi‑Fi 국가 코드. Raspberry Pi OS Lite는 이 값이 없으면 무선이 막혀 있습니다. |
-| `DISPLAY_ROTATE` | `normal` | 처음 화면 방향 `normal`·`left`·`right`·`inverted`. 이후에는 관리자 모드 › 화면에서 바꿀 수 있고, 재설치해도 그 값이 유지됩니다. |
+| `DISPLAY_ROTATE` | `normal` | 처음 화면 방향 `normal`·`left`·`right`·`inverted`. 설치 후에는 관리자 모드 › 화면에서 바꿀 수 있습니다. |
 | `HIDE_CURSOR` | `1` | `1`이면 마우스 커서를 숨깁니다 (터치 전용). |
-| `FIREWALL` | `1` | `1`이면 들어오는 연결을 모두 차단하는 방화벽을 켭니다. SSH가 켜져 있으면 SSH 포트만 허용합니다. 재설치할 때 생략하면 이전 상태(관리자 모드에서 바꾼 값)를 따릅니다. |
+| `FIREWALL` | `1` | `1`이면 들어오는 연결을 모두 차단하는 방화벽을 켭니다. SSH가 켜져 있으면 SSH 포트만 허용합니다. 설치 후에는 관리자 모드 › 보안에서 켜고 끌 수 있습니다. |
 | `NM_TAKEOVER` | `0` | `1`이면 다음 부팅부터 NetworkManager로 전환합니다 (위 설명 참고). |
+| `CHROMIUM_EXTRA_FLAGS` | 라즈베리파이: `--ignore-gpu-blocklist --enable-gpu-rasterization`, 그 외: 없음 | Chromium 추가 플래그 |
 | `SKIP_PACKAGES` | `0` | `1`이면 패키지 설치를 건너뜁니다. |
 | `REBOOT` | `0` | `1`이면 설치가 끝나고 바로 재부팅합니다. |
 
-스크립트는 여러 번 실행해도 안전합니다. 설정을 바꾸려면 바꿀 값만 넣고 다시 실행한 뒤 재부팅하세요.
-
-```bash
-sudo DISPLAY_ROTATE=right ./install.sh && sudo reboot
-```
-
-Chromium 플래그는 `/etc/default/miraepass-kiosk`의 `CHROMIUM_EXTRA_FLAGS`로 기기마다 조정할 수 있습니다. 라즈베리파이는 GPU 래스터화를 켜는 `--ignore-gpu-blocklist --enable-gpu-rasterization`이 기본으로 들어갑니다.
+이미 설치된 기기에서는 `install.sh`가 실행되지 않습니다. 키오스크 URL·PIN처럼 설치할 때 정한 값을 바꾸려면 아래 "다시 설치"를 따르세요. 화면 방향, 방화벽, SSH, 네트워크는 관리자 모드에서 바꿀 수 있습니다.
 
 ### 필요 패키지 (`SKIP_PACKAGES=1`로 직접 설치할 때)
 
@@ -68,17 +63,17 @@ Chromium 플래그는 `/etc/default/miraepass-kiosk`의 `CHROMIUM_EXTRA_FLAGS`�
 - Chromium 또는 Google Chrome
 - (선택) `openbox`
 
-## 재설치
+## 다시 설치
 
-같은 명령으로 다시 실행하면 됩니다. 값을 생략하면 이전 설정을 그대로 씁니다.
+설정이 섞이지 않도록 **삭제한 뒤 새로 설치**합니다. 이미 설치된 상태에서 `install.sh`를 실행하면 안내만 보여 주고 멈춥니다.
 
-| 구분 | 재설치할 때 |
-| --- | --- |
-| 유지 | 키오스크 URL, 관리자 PIN, 화면 방향, 방화벽 켜짐/꺼짐, `CHROMIUM_EXTRA_FLAGS` |
-| 덮어씀 | 서비스·실행 스크립트·시작 화면·Chromium 정책 (최신 버전으로 교체) |
-| 건드리지 않음 | 저장된 유선/Wi‑Fi 연결, SSH 상태, Chromium 프로필(기기 토큰) |
+```bash
+sudo miraepass-kiosk-uninstall
+sudo CLOUD_URL=https://YOUR_DOMAIN/kiosk ADMIN_PIN=2580 ./install.sh
+sudo reboot
+```
 
-키오스크 화면이 실행 중이면 새 스크립트로 자동으로 다시 시작합니다.
+새로 설치하면 모든 키오스크 설정이 기본값으로 시작합니다. 기기 토큰도 지워지므로 처음 등록 화면에서 다시 입력해야 합니다.
 
 ## 삭제
 
@@ -88,10 +83,10 @@ sudo miraepass-kiosk-uninstall            # 설치할 때 함께 복사됨 (저�
 sudo ./uninstall.sh
 ```
 
-- 키오스크 화면·로컬 제어 서비스·방화벽 서비스와 설치한 설정 파일을 모두 지웁니다.
+- 키오스크 화면·로컬 제어 서비스·방화벽 서비스와 설치한 설정 파일, 키오스크 설정(기기 토큰, 화면 방향, 관리자 PIN 등)을 모두 지웁니다.
 - 설치 전에 기록해 둔 부팅 기본값(콘솔/데스크톱), tty1 로그인, Xorg 권한 설정을 원래대로 되돌립니다.
 - **SSH로 작업 중 연결이 끊기지 않도록** 네트워크 연결 설정과 SSH 상태는 그대로 둡니다. 설치한 패키지도 남겨 둡니다.
-- `REMOVE_BROWSER_DATA=1`: Chromium 프로필(저장된 기기 토큰)까지 삭제, `YES=1`: 확인 질문 생략, `REBOOT=1`: 삭제 후 재부팅
+- `YES=1`: 확인 질문 생략, `REBOOT=1`: 삭제 후 재부팅, `KEEP_BROWSER_DATA=1`: Chromium 프로필(기기 토큰)은 남김
 
 ## 설치되는 것
 
@@ -101,8 +96,6 @@ sudo ./uninstall.sh
 - `/usr/local/bin/miraepass-kiosk-rotate`: 화면·터치 회전 스크립트 (부팅 시와 관리자 모드에서 공통 사용)
   - 터치 장치는 이름이 아니라 속성(절대 좌표 입력)으로 찾아서 마우스·터치패드는 건드리지 않습니다.
   - 저장된 방향은 `/etc/X11/xorg.conf.d/99-miraepass-touch-rotation.conf`에도 기록돼, USB 터치가 다시 연결돼도 같은 방향이 적용됩니다.
-
-> 이전 이름(`scripts/pi-kiosk`, `miraepass-pi-control`)으로 설치한 기기는 새 스크립트로 다시 설치하면 서비스가 자동으로 교체되고 관리자 PIN도 이어집니다.
 - Chromium·Chrome 정책(`/etc/chromium/policies/managed`, `/etc/chromium-browser/policies/managed`, `/etc/opt/chrome/policies/managed`): 비밀번호 저장·번역 말풍선을 끄고, 클라우드 페이지가 `127.0.0.1` 로컬 서비스를 부를 때 권한 팝업이 뜨지 않게 허용
 
 Chromium은 먼저 로컬 시작 화면(`http://127.0.0.1:8765/launch`, 파일: `/usr/local/share/miraepass-kiosk/launch.html`)을 열고, 클라우드 키오스크 주소에 연결되면 그 페이지로 이동합니다.

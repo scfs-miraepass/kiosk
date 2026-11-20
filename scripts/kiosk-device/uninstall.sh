@@ -4,7 +4,8 @@
 #   sudo miraepass-kiosk-uninstall          # 설치 시 함께 복사됨
 #   sudo ./scripts/kiosk-device/uninstall.sh
 #
-# install.sh가 추가한 서비스·파일을 지우고, 설치 전에 기록해 둔 시스템 설정을 되돌린다.
+# install.sh가 추가한 서비스·파일과 키오스크 설정(기기 토큰, 화면 방향, 방화벽, PIN 등)을 모두 지우고,
+# 설치 전에 기록해 둔 시스템 설정을 되돌린다. 삭제 후 install.sh를 다시 실행하면 기본값으로 새로 설치된다.
 #
 # 일부러 그대로 두는 것 (SSH로 작업하는 도중 연결이 끊기지 않도록)
 #   - NetworkManager에 저장된 유선/Wi‑Fi 연결과 NM_TAKEOVER 전환
@@ -13,7 +14,7 @@
 #
 # 선택 환경 변수
 #   YES=1                  확인 질문 없이 진행
-#   REMOVE_BROWSER_DATA=1  키오스크 사용자의 Chromium 프로필(저장된 기기 토큰 포함)도 삭제
+#   KEEP_BROWSER_DATA=1    키오스크 사용자의 Chromium 프로필(저장된 기기 토큰 포함)을 남김 (기본: 삭제)
 #   REBOOT=1               삭제 후 바로 재부팅
 set -euo pipefail
 
@@ -28,7 +29,7 @@ state() { sed -n "s/^$1=//p" "${STATE_FILE}" 2>/dev/null | head -n1; }
 warn() { echo "    (경고) $*" >&2; }
 
 if [[ ! -e /etc/systemd/system/miraepass-kiosk.service && ! -e /etc/systemd/system/miraepass-kiosk-control.service \
-  && ! -e /etc/systemd/system/miraepass-pi-control.service && ! -d "${STATE_DIR}" ]]; then
+  && ! -e /etc/systemd/system/miraepass-firewall.service && ! -d "${STATE_DIR}" ]]; then
   echo "MIRAEPASS 키오스크가 설치돼 있지 않습니다."
   exit 0
 fi
@@ -41,7 +42,7 @@ fi
 echo "MIRAEPASS 키오스크를 삭제합니다."
 echo "  - 키오스크 화면, 로컬 제어 서비스, 방화벽(들어오는 연결 차단)이 제거됩니다."
 echo "  - 네트워크 설정과 SSH 상태는 그대로 둡니다."
-[[ "${REMOVE_BROWSER_DATA:-0}" == "1" ]] && echo "  - ${KIOSK_USER:-키오스크 사용자}의 Chromium 프로필도 삭제합니다."
+[[ "${KEEP_BROWSER_DATA:-0}" != "1" ]] && echo "  - 저장된 기기 토큰(${KIOSK_USER:-키오스크 사용자}의 Chromium 프로필)도 삭제합니다."
 if [[ "${YES:-0}" != "1" ]]; then
   if [[ ! -t 0 ]]; then
     echo "확인할 수 없는 환경입니다. YES=1 을 붙여 실행하세요." >&2
@@ -55,7 +56,7 @@ fi
 
 echo "==> 서비스 중지 / 삭제"
 # 방화벽은 ExecStop에서 nftables 테이블을 지운다
-for unit in miraepass-kiosk.service miraepass-kiosk-control.service miraepass-firewall.service miraepass-pi-control.service; do
+for unit in miraepass-kiosk.service miraepass-kiosk-control.service miraepass-firewall.service; do
   if [[ -e "/etc/systemd/system/${unit}" ]]; then
     systemctl disable --now "${unit}" >/dev/null 2>&1 || true
     rm -f "/etc/systemd/system/${unit}"
@@ -74,10 +75,8 @@ rm -f \
   /usr/local/bin/miraepass-kiosk-session \
   /usr/local/bin/miraepass-kiosk-rotate \
   /usr/local/bin/miraepass-kiosk-control.py \
-  /usr/local/bin/miraepass-pi-control.py \
   /etc/default/miraepass-kiosk \
   /etc/default/miraepass-kiosk-control \
-  /etc/default/miraepass-pi-control \
   /etc/X11/xorg.conf.d/99-miraepass-touch-rotation.conf \
   /etc/modprobe.d/miraepass-wifi-country.conf \
   /etc/chromium/policies/managed/miraepass-kiosk.json \
@@ -115,7 +114,7 @@ fi
 
 NM_NOTE="$(state NM_TAKEOVER_FROM)"
 
-if [[ "${REMOVE_BROWSER_DATA:-0}" == "1" && -n "${KIOSK_USER}" ]]; then
+if [[ "${KEEP_BROWSER_DATA:-0}" != "1" && -n "${KIOSK_USER}" ]]; then
   HOME_DIR="$(getent passwd "${KIOSK_USER}" | cut -d: -f6)"
   if [[ -n "${HOME_DIR}" && -d "${HOME_DIR}" ]]; then
     rm -rf "${HOME_DIR}/.config/chromium" "${HOME_DIR}/.config/google-chrome" "${HOME_DIR}/snap/chromium/common/chromium"
@@ -135,9 +134,10 @@ if [[ -n "${NM_NOTE}" ]]; then
   echo "- 설치 때 네트워크 관리를 NetworkManager로 전환했습니다 (이전: ${NM_NOTE})."
   echo "  NetworkManager로 계속 써도 됩니다. 되돌리려면 이전 설정을 직접 복원하세요."
 fi
-if [[ "${REMOVE_BROWSER_DATA:-0}" != "1" ]]; then
-  echo "- Chromium 프로필(저장된 기기 토큰)은 남아 있습니다: ~${KIOSK_USER:-사용자}/.config/chromium"
+if [[ "${KEEP_BROWSER_DATA:-0}" == "1" ]]; then
+  echo "- Chromium 프로필(저장된 기기 토큰)은 남겨 두었습니다: ~${KIOSK_USER:-사용자}/.config/chromium"
 fi
+echo "- 다시 설치: sudo CLOUD_URL=... ./install.sh (기본값으로 새로 설치됩니다)"
 
 if [[ "${REBOOT:-0}" == "1" ]]; then
   echo "==> 재부팅"
