@@ -83,6 +83,7 @@ export function StatusSection({ network, networkLoading, refreshNetwork, disable
         <Card title="기기 정보">
           <InfoGrid
             rows={[
+              ["기기 모델", health?.model],
               ["호스트 이름", network?.hostname ?? health?.hostname],
               ["로컬 서비스", health ? `연결됨 · v${health.version ?? "?"}` : "연결 안 됨"],
               ["전원 제어", health ? (health.powerControl ? "사용 가능" : "사용 불가") : "-"],

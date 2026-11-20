@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Local-only Raspberry Pi control API for the MIRAEPASS kiosk touchscreen.
+"""Local-only control API for the MIRAEPASS kiosk touchscreen.
+
+Runs on any systemd + NetworkManager Linux (Raspberry Pi OS, Debian, Ubuntu,
+Fedora, Arch ...). The file keeps its historical "pi-control" name so existing
+installs keep working.
 
 The cloud-hosted Next.js kiosk page calls this service through
 http://127.0.0.1:8765 from Chromium. Keep it bound to loopback only.
@@ -14,6 +18,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import platform
 import re
 import socket
 import subprocess
@@ -22,7 +27,7 @@ from typing import Any
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("MIRAEPASS_PI_CONTROL_PORT", "8765"))
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 ADMIN_PIN = os.environ.get("MIRAEPASS_KIOSK_ADMIN_PIN", "2580")
 ALLOW_POWER = os.environ.get("MIRAEPASS_PI_ALLOW_POWER") == "1"
 KIOSK_URL = os.environ.get("MIRAEPASS_KIOSK_URL", "")
@@ -107,7 +112,7 @@ class Handler(BaseHTTPRequestHandler):
             if path in ("/", "/launch"):
                 return self.launch_page()
             if path == "/health":
-                return self.ok({"ok": True, "hostname": socket.gethostname(), "version": VERSION, "powerControl": ALLOW_POWER})
+                return self.ok({"ok": True, "hostname": socket.gethostname(), "model": device_model(), "version": VERSION, "powerControl": ALLOW_POWER})
             if path == "/network/status":
                 return self.ok(network_status())
             if path == "/wifi/scan":
@@ -236,8 +241,39 @@ def devices() -> list[dict[str, str]]:
     return result
 
 
+# 컨테이너·가상머신용 가상 NIC는 키오스크 유선 LAN으로 보지 않는다 (x86 미니PC에서 흔함)
+VIRTUAL_IFACE = re.compile(r"^(veth|docker|br-|virbr|vnet|tap|tun|wg|zt|tailscale|lxc|podman|cni|flannel|vmnet)")
+
+
 def first_device(kind: str) -> dict[str, str] | None:
-    return next((d for d in devices() if d["type"] == kind), None)
+    """해당 종류의 실제 장치 하나. 연결된 것 → NetworkManager가 관리하는 것 → 아무거나 순으로 고른다."""
+    candidates = [d for d in devices() if d["type"] == kind and not VIRTUAL_IFACE.match(d["device"])]
+    if not candidates:
+        return None
+    rank = lambda d: (d["state"] != "connected", d["state"] == "unmanaged")  # noqa: E731
+    return sorted(candidates, key=rank)[0]
+
+
+def device_model() -> str:
+    """기기 모델명: 라즈베리파이 등 ARM 보드는 device-tree, x86 PC는 DMI에서 읽는다."""
+    for path in ("/proc/device-tree/model", "/sys/firmware/devicetree/base/model"):
+        try:
+            with open(path, "rb") as f:
+                value = f.read().replace(b"\0", b"").decode("utf-8", "replace").strip()
+            if value:
+                return value
+        except OSError:
+            pass
+    parts: list[str] = []
+    for path in ("/sys/class/dmi/id/sys_vendor", "/sys/class/dmi/id/product_name"):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                value = f.read().strip()
+            if value and value.lower() not in ("to be filled by o.e.m.", "default string", "system product name"):
+                parts.append(value)
+        except OSError:
+            pass
+    return " ".join(parts) or platform.machine() or "알 수 없음"
 
 
 def device_ip(device: str) -> dict[str, Any]:
@@ -308,7 +344,7 @@ def network_status() -> dict[str, Any]:
 
 
 def ensure_wifi_radio() -> None:
-    # 라즈베리파이 OS Lite는 WLAN 국가 설정 전 rfkill로 무선이 막혀 있을 수 있다.
+    # 라즈베리파이 OS Lite 등은 WLAN 국가 설정 전이나 절전 후 rfkill로 무선이 막혀 있을 수 있다.
     run(["rfkill", "unblock", "wifi"], timeout=5)
     run(["nmcli", "radio", "wifi", "on"], timeout=10)
 

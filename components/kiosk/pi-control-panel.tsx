@@ -30,7 +30,7 @@ type Props = {
 
 /**
  * 키오스크 관리자 모드 (전체 화면).
- * 라즈베리파이 로컬 제어 서비스(127.0.0.1:8765)를 통해 네트워크·전원을 설정한다.
+ * 키오스크 기기(라즈베리파이 등 리눅스)의 로컬 제어 서비스(127.0.0.1:8765)를 통해 네트워크·전원을 설정한다.
  * 화면 전체를 불투명하게 덮어서 뒤 키오스크 화면과 합성할 필요가 없게 했다 (Pi GPU 부담 최소화).
  */
 export function PiControlPanel({ onClose, onTokenRegistered }: Props) {
@@ -156,7 +156,7 @@ export function PiControlPanel({ onClose, onTokenRegistered }: Props) {
                     <Notice tone="warning">
                       {healthError ?? "로컬 서비스에 연결할 수 없어요"}
                       <span className="mt-1 block text-sm font-medium">
-                        라즈베리파이에서 <code className="rounded bg-amber-100 px-1">sudo systemctl status miraepass-pi-control</code> 로 서비스 상태를 확인해 주세요.
+                        키오스크 기기에서 <code className="rounded bg-amber-100 px-1">sudo systemctl status miraepass-pi-control</code> 로 서비스 상태를 확인해 주세요.
                         자동으로 다시 연결을 시도합니다.
                       </span>
                     </Notice>

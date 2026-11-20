@@ -1,6 +1,6 @@
 /**
- * 라즈베리파이 로컬 제어 서비스(scripts/pi-kiosk/miraepass-pi-control.py) 호출.
- * 클라우드 페이지가 Pi의 Chromium 안에서 열릴 때만 127.0.0.1로 닿는다.
+ * 키오스크 기기의 로컬 제어 서비스(scripts/pi-kiosk/miraepass-pi-control.py) 호출.
+ * 클라우드 페이지가 키오스크 기기(라즈베리파이 등 리눅스)의 Chromium 안에서 열릴 때만 127.0.0.1로 닿는다.
  */
 export const PI_CONTROL_URL = "http://127.0.0.1:8765";
 
@@ -27,7 +27,7 @@ export async function localApi<T>(path: string, init?: RequestInit & { timeoutMs
     });
   } catch {
     throw new LocalApiError(
-      controller.signal.aborted ? "응답이 너무 오래 걸려요. 잠시 뒤 다시 시도해 주세요" : "라즈베리파이 로컬 서비스에 연결할 수 없어요",
+      controller.signal.aborted ? "응답이 너무 오래 걸려요. 잠시 뒤 다시 시도해 주세요" : "키오스크 로컬 서비스에 연결할 수 없어요",
       controller.signal.aborted ? "TIMEOUT" : "UNREACHABLE",
     );
   } finally {
@@ -40,7 +40,7 @@ export async function localApi<T>(path: string, init?: RequestInit & { timeoutMs
 
 export const errorMessage = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback);
 
-export type Health = { ok: boolean; hostname?: string; version?: string; powerControl?: boolean };
+export type Health = { ok: boolean; hostname?: string; model?: string; version?: string; powerControl?: boolean };
 
 type IpInfo = { addresses: string[]; gateway: string; dns: string[] };
 

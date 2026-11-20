@@ -29,7 +29,7 @@ export function KioskAdminUnlock({ onUnlocked, onCancel }: { onUnlocked: () => v
       setPin("");
       setError(
         e instanceof TypeError || (e instanceof DOMException && e.name === "TimeoutError")
-          ? "라즈베리파이 로컬 서비스에 연결할 수 없어요"
+          ? "키오스크 로컬 서비스에 연결할 수 없어요"
           : e instanceof Error
             ? e.message
             : "PIN 확인에 실패했어요",

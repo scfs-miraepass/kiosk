@@ -67,7 +67,7 @@ yarn start               # NODE_ENV=production, PORT 기본 3000
 
 Chromium은 GPU 가속을 켜고 실행하세요. (Raspberry Pi OS Bookworm은 `chromium-browser`, 이후 버전은 `chromium`)
 
-라즈베리파이 OS Lite를 새로 준비할 때는 Xorg/openbox/Chromium 자동 실행과 터치 설정용 로컬 서비스를 한 번에 설치할 수 있습니다.
+라즈베리파이 OS Lite(또는 systemd + NetworkManager를 쓰는 다른 리눅스: Debian·Ubuntu·Armbian·Fedora·Arch 등)를 새로 준비할 때는 Xorg/openbox/Chromium 자동 실행과 터치 설정용 로컬 서비스를 한 번에 설치할 수 있습니다.
 
 ```bash
 sudo CLOUD_URL=https://<서버주소>/kiosk ADMIN_PIN=2580 ./scripts/pi-kiosk/install.sh
