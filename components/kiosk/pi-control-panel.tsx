@@ -1,6 +1,6 @@
 "use client";
 
-import { KeyRound, Laptop, Loader2, Power, RefreshCw, RotateCw, Wifi, X } from "lucide-react";
+import { KeyRound, Laptop, Loader2, Power, RefreshCw, RotateCw, X } from "lucide-react";
 import type React from "react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -70,7 +70,7 @@ export function PiControlPanel({ onFocusTarget, onInputBlur, onClose, onTokenReg
           <h2 className="flex items-center gap-2 text-xl font-bold">
             <Laptop className="size-6 text-primary" /> 키오스크 관리자 모드
           </h2>
-          <p className="text-sm text-muted-foreground">네트워크 설정과 전원 제어는 Pi의 로컬 서비스({PI_CONTROL_URL})가 처리합니다.</p>
+          <p className="text-sm text-muted-foreground">토큰, 유선 LAN, 무선 Wi‑Fi, 전원 제어를 설정합니다.</p>
         </div>
         <div className="flex gap-2">
           <Button type="button" variant="outline" onClick={check} className="h-11 rounded-xl">
@@ -92,19 +92,14 @@ export function PiControlPanel({ onFocusTarget, onInputBlur, onClose, onTokenReg
         </p>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <div className="space-y-4">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_320px]">
+        <div className="space-y-4 xl:col-span-2">
           {onTokenRegistered && (
             <TokenResetPanel onFocusTarget={onFocusTarget} onInputBlur={onInputBlur} onTokenRegistered={onTokenRegistered} />
           )}
-          <div className="rounded-3xl border bg-slate-50 p-4">
-            <h3 className="mb-4 flex items-center gap-2 text-lg font-extrabold">
-              <Wifi className="size-5 text-primary" /> 네트워크 설정
-            </h3>
-            <div className="grid gap-4 xl:grid-cols-2">
-              <EthernetPanel disabled={!health} onFocusTarget={onFocusTarget} onInputBlur={onInputBlur} />
-              <WifiPanel disabled={!health} onFocusTarget={onFocusTarget} onInputBlur={onInputBlur} />
-            </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <EthernetPanel disabled={!health} onFocusTarget={onFocusTarget} onInputBlur={onInputBlur} />
+            <WifiPanel disabled={!health} onFocusTarget={onFocusTarget} onInputBlur={onInputBlur} />
           </div>
         </div>
         <SystemPanel disabled={!health} onClose={onClose} />
@@ -225,20 +220,23 @@ function EthernetPanel({
   };
 
   return (
-    <div className="space-y-3 rounded-3xl bg-white p-4">
+    <div className="space-y-3 rounded-3xl border bg-slate-50 p-4">
       <div className="flex items-center justify-between gap-2">
-        <h4 className="font-extrabold">유선 LAN</h4>
+        <div>
+          <h3 className="text-lg font-extrabold">유선 LAN</h3>
+          <p className="text-xs text-muted-foreground">이더넷 케이블 연결 설정</p>
+        </div>
         <Button type="button" variant="outline" onClick={refresh} disabled={disabled || loading} className="h-10 rounded-xl">
           {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} 상태
         </Button>
       </div>
       {status && (
-        <p className="rounded-2xl bg-slate-100 p-3 text-xs text-slate-700">
+        <p className="rounded-2xl bg-white p-3 text-xs text-slate-700">
           장치: {status.device ?? "없음"} · 연결: {status.connection ?? "없음"} · 상태: {status.state}
           {status.addresses && <span className="block whitespace-pre-wrap">{status.addresses}</span>}
         </p>
       )}
-      <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
+      <div className="grid grid-cols-2 gap-2 rounded-2xl bg-white p-1">
         <ModeButton active={mode === "dhcp"} onClick={() => setMode("dhcp")} disabled={disabled || loading}>
           DHCP 자동
         </ModeButton>
@@ -277,7 +275,7 @@ function EthernetPanel({
           />
         </div>
       )}
-      {message && <p className="rounded-2xl bg-slate-100 p-3 text-sm text-slate-700">{message}</p>}
+      {message && <p className="rounded-2xl bg-white p-3 text-sm text-slate-700">{message}</p>}
       <Button type="button" onClick={apply} disabled={disabled || loading || (mode === "static" && !address.trim())} className="h-12 w-full rounded-xl text-base">
         유선 설정 적용
       </Button>
@@ -341,7 +339,11 @@ function WifiPanel({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 rounded-3xl border bg-slate-50 p-4">
+      <div>
+        <h3 className="text-lg font-extrabold">무선 Wi‑Fi</h3>
+        <p className="text-xs text-muted-foreground">WPA-Personal / WPA-Enterprise 연결</p>
+      </div>
       <div className="grid grid-cols-[1fr_auto] gap-2">
         <Input
           value={ssid}
@@ -385,7 +387,7 @@ function WifiPanel({
         disabled={disabled || loading}
       />
       {networks.length > 0 && (
-        <div className="max-h-48 space-y-2 overflow-auto rounded-2xl border p-2">
+        <div className="max-h-48 space-y-2 overflow-auto rounded-2xl border bg-white p-2">
           {networks.map((n) => (
             <button key={`${n.ssid}-${n.security}`} type="button" onClick={() => selectNetwork(n)} className="flex w-full items-center justify-between rounded-xl bg-slate-50 p-3 text-left hover:bg-blue-50">
               <span className="font-semibold">{n.ssid}</span>
@@ -394,7 +396,7 @@ function WifiPanel({
           ))}
         </div>
       )}
-      {message && <p className="rounded-2xl bg-slate-100 p-3 text-sm text-slate-700">{message}</p>}
+      {message && <p className="rounded-2xl bg-white p-3 text-sm text-slate-700">{message}</p>}
       <Button type="button" onClick={connect} disabled={disabled || loading || !ssid.trim()} className="h-12 w-full rounded-xl text-base">
         Wi‑Fi 연결
       </Button>
