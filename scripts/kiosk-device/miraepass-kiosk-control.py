@@ -34,7 +34,8 @@ from urllib.parse import urlsplit
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("MIRAEPASS_KIOSK_CONTROL_PORT", "8765"))
-VERSION = "1.3.0"
+# 설치한 키오스크 저장소 버전 (install.sh가 package.json·git 커밋에서 읽어 기록. 예: "1.1.1+a1b2c3d")
+VERSION = os.environ.get("MIRAEPASS_KIOSK_VERSION", "").strip() or "unknown"
 ADMIN_PIN = os.environ.get("MIRAEPASS_KIOSK_ADMIN_PIN", "2580")
 ALLOW_POWER = os.environ.get("MIRAEPASS_KIOSK_ALLOW_POWER") == "1"
 KIOSK_URL = os.environ.get("MIRAEPASS_KIOSK_URL", "")
@@ -109,7 +110,7 @@ def split_multi(value: str) -> list[str]:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "MiraepassKioskControl/1.3"
+    server_version = "MiraepassKioskControl"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         print("[kiosk-control]", self.address_string(), fmt % args, flush=True)

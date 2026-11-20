@@ -18,6 +18,25 @@ import {
   type WifiStatus,
 } from "./local-api";
 
+/** 키오스크 앱 버전 (빌드할 때 package.json에서 넣음, next.config.ts) */
+const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "";
+
+/** "1.1.1+a1b2c3d.dirty" → "1.1.1". 알 수 없으면 "" */
+function baseVersion(version?: string) {
+  if (!version || version === "unknown") return "";
+  return version.split("+")[0];
+}
+
+/** 기기 스크립트 버전 표시: v1.1.1 (커밋 a1b2c3d, 수정됨) */
+function versionLabel(version?: string) {
+  const base = baseVersion(version);
+  if (!base) return "알 수 없음 (저장소 밖에서 설치됨)";
+  const build = version!.split("+")[1];
+  if (!build) return `v${base}`;
+  const [commit, dirty] = build.split(".");
+  return `v${base} (커밋 ${commit}${dirty ? ", 수정본" : ""})`;
+}
+
 /** Wi‑Fi 화면을 보는 동안 신호 세기를 다시 읽는 간격 */
 const WIFI_POLL_MS = 5000;
 
@@ -51,6 +70,8 @@ function RefreshButton({ onClick, loading, disabled }: { onClick: () => void; lo
 
 export function StatusSection({ network, networkLoading, refreshNetwork, disabled, health, onNavigate }: NetworkProps & { health: Health | null; onNavigate: (s: AdminSection) => void }) {
   const conn = network ? (CONNECTIVITY[network.connectivity] ?? { label: "확인 불가", tone: "off" as const }) : null;
+  const deviceVersion = baseVersion(health?.version);
+  const scriptOutdated = Boolean(APP_VERSION && deviceVersion && deviceVersion !== APP_VERSION);
 
   return (
     <>
@@ -86,12 +107,18 @@ export function StatusSection({ network, networkLoading, refreshNetwork, disable
             onClick={() => onNavigate("wifi")}
           />
         </div>
+        {scriptOutdated && (
+          <Notice tone="warning" className="text-sm">
+            기기 스크립트(v{baseVersion(health?.version)})가 키오스크 앱(v{APP_VERSION})과 버전이 달라요. 새 기능이 동작하지 않으면 기기 스크립트를 삭제 후 다시 설치해 주세요.
+          </Notice>
+        )}
         <Card title="기기 정보">
           <InfoGrid
             rows={[
               ["기기 모델", health?.model],
               ["호스트 이름", network?.hostname ?? health?.hostname],
-              ["로컬 서비스", health ? `연결됨 · v${health.version ?? "?"}` : "연결 안 됨"],
+              ["키오스크 앱", APP_VERSION ? `v${APP_VERSION}` : "알 수 없음"],
+              ["기기 스크립트", health ? versionLabel(health.version) : "로컬 서비스 연결 안 됨"],
               ["전원 제어", health ? (health.powerControl ? "사용 가능" : "사용 불가") : "-"],
               ["키오스크 주소", typeof window === "undefined" ? "" : window.location.origin],
             ]}

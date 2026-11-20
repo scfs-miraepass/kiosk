@@ -27,16 +27,36 @@ CPU는 ARM(aarch64·armhf)과 x86_64 모두 지원합니다. Chromium이나 Goog
 
 ## SSH로 설치
 
+**저장소째 받아서 설치 (권장)** — 설치한 버전(앱 버전 + 커밋)이 관리자 모드에 표시됩니다.
+
 ```bash
-# 개발 PC에서: 설치 폴더를 기기로 복사
-scp -r scripts/kiosk-device <사용자>@<기기 IP>:~/
+# 개발 PC에서: 저장소를 기기로 복사 (또는 기기에서 git clone)
+rsync -a --exclude node_modules --exclude .next ./ <사용자>@<기기 IP>:~/miraepass-kiosk/
 
 # 기기에 접속해서 설치
 ssh <사용자>@<기기 IP>
-cd ~/kiosk-device
-sudo CLOUD_URL=https://YOUR_DOMAIN/kiosk ADMIN_PIN=2580 ./install.sh
+cd ~/miraepass-kiosk
+sudo CLOUD_URL=https://YOUR_DOMAIN/kiosk ADMIN_PIN=2580 ./scripts/kiosk-device/install.sh
 sudo reboot
 ```
+
+**설치 폴더만 복사** — 버전을 알 수 없으므로 `KIOSK_VERSION`으로 직접 넘겨 주세요.
+
+```bash
+scp -r scripts/kiosk-device <사용자>@<기기 IP>:~/
+ssh <사용자>@<기기 IP>
+cd ~/kiosk-device
+sudo CLOUD_URL=https://YOUR_DOMAIN/kiosk KIOSK_VERSION=1.1.1 ./install.sh
+```
+
+### 버전 표시
+
+관리자 모드 › 상태 › 기기 정보에 두 버전이 함께 나옵니다.
+
+- **키오스크 앱**: 클라우드 서버의 앱 버전 (빌드할 때 `package.json`에서 읽음)
+- **기기 스크립트**: 이 기기에 설치한 스크립트 버전 (설치할 때 저장소 `package.json` + git 커밋에서 읽음. 예: `v1.1.1 (커밋 a1b2c3d)`, 커밋하지 않은 수정이 있으면 "수정본")
+
+두 버전이 다르면 기기 스크립트를 삭제 후 다시 설치하라는 안내가 표시됩니다.
 
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
@@ -49,6 +69,7 @@ sudo reboot
 | `FIREWALL` | `1` | `1`이면 들어오는 연결을 모두 차단하는 방화벽을 켭니다. SSH가 켜져 있으면 SSH 포트만 허용합니다. 설치 후에는 관리자 모드 › 보안에서 켜고 끌 수 있습니다. |
 | `NM_TAKEOVER` | `0` | `1`이면 다음 부팅부터 NetworkManager로 전환합니다 (위 설명 참고). |
 | `CHROMIUM_EXTRA_FLAGS` | 라즈베리파이: `--ignore-gpu-blocklist --enable-gpu-rasterization`, 그 외: 없음 | Chromium 추가 플래그 |
+| `KIOSK_VERSION` | 저장소 `package.json` 버전 + git 커밋 | 관리자 모드에 표시할 기기 스크립트 버전 |
 | `SKIP_PACKAGES` | `0` | `1`이면 패키지 설치를 건너뜁니다. |
 | `REBOOT` | `0` | `1`이면 설치가 끝나고 바로 재부팅합니다. |
 
