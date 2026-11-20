@@ -66,7 +66,15 @@ export const ORDER_STATUSES = [
   "completed",
   "cancelled",
 ] as const;
-export const PAYMENT_STATUSES = ["unpaid", "paid", "failed", "refunded", "refund_failed"] as const;
+export const PAYMENT_STATUSES = [
+  "unpaid",
+  "paid",
+  "failed",
+  "unknown",
+  "refunded",
+  "refunding",
+  "refund_failed",
+] as const;
 
 export const orders = sqliteTable(
   "orders",

@@ -1,7 +1,7 @@
 "use client";
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Download, Loader2, RotateCcw, Search } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Download, Loader2, RotateCcw, Search, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -33,7 +33,13 @@ const ACTION_LABEL: Record<string, string> = {
   refund: "환불 완료",
   refund_failed: "환불 실패",
   recall: "재호출",
+  payment_unknown: "결제 결과 불명",
+  payment_confirmed: "결제 확인 · 접수",
+  payment_voided: "미결제 확정",
 };
+
+/** 관리자가 직접 처리해야 하는 결제 상태 (빨간색으로 표시) */
+const NEEDS_ACTION: PaymentStatus[] = ["refund_failed", "unknown"];
 
 const STATUS_TONE: Record<OrderStatus, string> = {
   pending_payment: "bg-slate-100 text-slate-600",
@@ -198,7 +204,7 @@ export function OrdersView() {
                     <span className={cn("rounded-full px-2 py-0.5 text-xs font-bold", STATUS_TONE[o.status])}>{STATUS_LABEL[o.status]}</span>
                   </TableCell>
                   <TableCell className="pr-4">
-                    <span className={cn("text-xs font-semibold", o.paymentStatus === "refund_failed" && "text-destructive")}>
+                    <span className={cn("text-xs font-semibold", NEEDS_ACTION.includes(o.paymentStatus) && "text-destructive")}>
                       {PAYMENT_LABEL[o.paymentStatus]}
                     </span>
                   </TableCell>
@@ -282,6 +288,18 @@ function OrderDetailSheet({ id, onClose }: { id: number | null; onClose: () => v
       qc.invalidateQueries({ queryKey: ["admin"] });
     },
   });
+  const resolve = useMutation({
+    mutationFn: (paid: boolean) =>
+      api<OrderDTO>(`/api/admin/orders/${id}/resolve`, { method: "POST", body: { paid } }),
+    onSuccess: (_, paid) => {
+      toast.success(paid ? "결제를 확인했어요. 직원 화면에 주문이 올라가요" : "미결제로 확정했어요");
+      qc.invalidateQueries({ queryKey: ["admin"] });
+    },
+    onError: (e) => {
+      toast.error(e instanceof ClientApiError ? e.message : "처리하지 못했어요");
+      qc.invalidateQueries({ queryKey: ["admin"] });
+    },
+  });
   const o = detail.data?.order;
 
   return (
@@ -299,12 +317,35 @@ function OrderDetailSheet({ id, onClose }: { id: number | null; onClose: () => v
           <div className="space-y-6 px-4 pb-6">
             <div className="flex gap-2">
               <span className={cn("rounded-full px-2.5 py-1 text-xs font-bold", STATUS_TONE[o.status])}>{STATUS_LABEL[o.status]}</span>
-              <Badge variant={o.paymentStatus === "refund_failed" ? "destructive" : "secondary"}>{PAYMENT_LABEL[o.paymentStatus]}</Badge>
+              <Badge variant={NEEDS_ACTION.includes(o.paymentStatus) ? "destructive" : "secondary"}>{PAYMENT_LABEL[o.paymentStatus]}</Badge>
             </div>
+
+            {o.paymentStatus === "unknown" && (
+              <div className="space-y-2 rounded-xl border border-red-200 bg-red-50 p-3">
+                <p className="text-sm font-semibold text-red-700">
+                  MIRAEPASS 응답을 받지 못해 포인트가 빠졌는지 알 수 없어요. MIRAEPASS에서 고객({o.customerId})의 포인트 내역을 확인한 뒤
+                  처리해 주세요.
+                </p>
+                <p className="text-xs text-red-700/80">
+                  차감됐으면 주문이 접수되고 직원 화면에 올라가요. 음료를 드리지 못하면 직원 화면에서 취소해 환불하세요.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="destructive" disabled={resolve.isPending} onClick={() => resolve.mutate(true)}>
+                    {resolve.isPending ? <Loader2 className="animate-spin" /> : <Check />}
+                    차감됨 · 주문 접수 ({formatPoint(o.total)})
+                  </Button>
+                  <Button variant="outline" disabled={resolve.isPending} onClick={() => resolve.mutate(false)}>
+                    <X />
+                    차감 안 됨
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {o.paymentStatus === "refund_failed" && (
               <div className="space-y-2 rounded-xl border border-red-200 bg-red-50 p-3">
                 <p className="text-sm font-semibold text-red-700">MIRAEPASS 환불에 실패했어요. 다시 시도하거나 MIRAEPASS 관리자에서 직접 지급해 주세요.</p>
+                <p className="text-xs text-red-700/80">응답을 받지 못한 경우엔 이미 지급됐을 수 있어요. 재시도 전에 MIRAEPASS 포인트 내역을 확인해 주세요.</p>
                 <Button variant="destructive" disabled={refund.isPending} onClick={() => refund.mutate()}>
                   {refund.isPending ? <Loader2 className="animate-spin" /> : <RotateCcw />}
                   환불 재시도 ({formatPoint(o.total)})

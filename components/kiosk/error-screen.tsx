@@ -13,12 +13,16 @@ const TITLES: Record<string, string> = {
   INVALID_OPTIONS: "옵션이 변경됐어요",
   PRICE_CHANGED: "가격이 변경됐어요",
   PAYMENT_UNAVAILABLE: "결제 서버에 연결할 수 없어요",
+  PAYMENT_UNKNOWN: "결제 결과를 확인하지 못했어요",
   PIN_NOT_SET: "키오스크 비밀번호가 없어요",
   PIN_LOCKED: "잠시 결제할 수 없어요",
 };
 
 /** 다른 사람(ID)으로 다시 결제해야 하는 오류 */
 const BACK_TO_IDENTIFY = new Set(["INSUFFICIENT_POINT", "USER_NOT_FOUND", "PIN_NOT_SET", "PIN_LOCKED"]);
+
+/** 다시 결제하면 안 되는 오류 (STORE_CLOSED: 주문 불가, PAYMENT_UNKNOWN: 이미 차감됐을 수 있음) */
+const NO_RETRY = new Set(["STORE_CLOSED", "PAYMENT_UNKNOWN"]);
 
 /** 오류 코드별 다음 행동: 장바구니 수정이 필요한 오류는 주문 확인 화면으로 */
 const BACK_TO_REVIEW = new Set(["ITEM_SOLD_OUT", "ITEM_UNAVAILABLE", "INVALID_OPTIONS", "PRICE_CHANGED"]);
@@ -55,7 +59,7 @@ export function ErrorScreen({ onHome }: { onHome: () => void }) {
         <button onClick={onHome} className="h-16 rounded-2xl bg-white text-xl font-semibold shadow-sm active:scale-[0.98]">
           처음으로
         </button>
-        {error.code !== "STORE_CLOSED" && (
+        {!NO_RETRY.has(error.code) && (
           <button onClick={retry} className="h-16 rounded-2xl bg-primary text-xl font-bold text-primary-foreground active:scale-[0.98]">
             {retryLabel}
           </button>

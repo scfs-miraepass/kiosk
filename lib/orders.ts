@@ -141,7 +141,13 @@ const FAIL_MESSAGES: Partial<Record<ApiError["code"], string>> = {
   INSUFFICIENT_POINT: "포인트가 부족해요",
   USER_NOT_FOUND: "MIRAEPASS 사용자를 찾을 수 없어요",
   PAYMENT_UNAVAILABLE: "MIRAEPASS 결제 서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요",
+  PAYMENT_UNKNOWN: "결제 결과를 확인하지 못했어요. 포인트가 빠졌을 수 있으니 다시 결제하지 말고 카페 직원에게 알려 주세요",
 };
+
+const PAID_STATES: Order["paymentStatus"][] = ["paid", "refunding", "refunded", "refund_failed"];
+
+const paymentUnknownError = (orderId: number) =>
+  new ApiError("PAYMENT_UNKNOWN", `${FAIL_MESSAGES.PAYMENT_UNKNOWN} (주문 ID ${orderId})`, 502, { orderId });
 
 /**
  * 키오스크 주문 처리: 영업 확인 → 가격 재계산 → 고객 조회 → 결제 비밀번호 검증 → 포인트 차감 → 주문 확정.
@@ -155,9 +161,11 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   // 2. 멱등성: 같은 키로 이미 처리한 주문이면 그 결과를 그대로 돌려준다
   const existing = db.select().from(schema.orders).where(eq(schema.orders.idempotencyKey, input.idempotencyKey)).get();
   if (existing) {
-    if (existing.paymentStatus === "paid" || existing.paymentStatus === "refunded") {
+    // 결제가 끝난 주문 (이후 취소·환불됐더라도 결제 자체는 성공했다)
+    if (PAID_STATES.includes(existing.paymentStatus)) {
       return { orderId: existing.id, orderNo: existing.orderNo ?? 0, total: existing.total, balanceAfter: existing.balanceAfter };
     }
+    if (existing.paymentStatus === "unknown") throw paymentUnknownError(existing.id);
     if (existing.status === "failed") throw failureFromStored(existing);
     throw new ApiError("PAYMENT_UNAVAILABLE", "결제를 처리하고 있어요. 잠시만 기다려 주세요", 409);
   }
@@ -226,6 +234,18 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
   try {
     balanceAfter = await gateway.deduct(customer.id, priced.total, `교내 카페 주문 (ID ${orderId})`);
   } catch (e) {
+    if (e instanceof MiraepassError && e.uncertain) {
+      // 요청이 MIRAEPASS에 닿았는지 알 수 없다. '실패'로 단정하면 포인트만 빠지고 주문이 사라질 수 있으므로
+      // 확인 필요(unknown)로 남기고, 관리자가 MIRAEPASS 내역을 보고 확정한다 (resolveUnknownPayment)
+      console.error("[miraepass] 차감 결과 불명", orderId, e.status, e.message);
+      db.update(schema.orders)
+        .set({ status: "failed", paymentStatus: "unknown", failReason: "PAYMENT_UNKNOWN" })
+        .where(eq(schema.orders.id, orderId))
+        .run();
+      logAction(orderId, null, "payment_unknown", e.message);
+      emit("admin", "order:updated", getOrder(orderId));
+      throw paymentUnknownError(orderId);
+    }
     const err = mapMiraepassError(e);
     db.update(schema.orders)
       .set({ status: "failed", paymentStatus: "failed", failReason: err.code })
@@ -233,20 +253,49 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
       .run();
     throw err;
   }
-  const orderNo = db.transaction((tx) => {
+  const orderNo = confirmPaid(orderId, day, balanceAfter);
+  emit(["staff", "admin"], "order:new", getOrder(orderId));
+  return { orderId, orderNo, total: priced.total, balanceAfter };
+}
+
+/** 결제 확정: 그날의 주문번호를 부여하고 접수 대기로 */
+function confirmPaid(orderId: number, day: string, balanceAfter: number | null) {
+  return db.transaction((tx) => {
     const { next } = tx
       .select({ next: sql<number>`coalesce(max(${schema.orders.orderNo}), 0) + 1` })
       .from(schema.orders)
       .where(eq(schema.orders.businessDate, day))
       .get()!;
     tx.update(schema.orders)
-      .set({ orderNo: next, status: "received", paymentStatus: "paid", balanceAfter, paidAt: new Date() })
+      .set({ orderNo: next, status: "received", paymentStatus: "paid", balanceAfter, paidAt: new Date(), failReason: null })
       .where(eq(schema.orders.id, orderId))
       .run();
     return next;
   });
-  emit(["staff", "admin"], "order:new", getOrder(orderId));
-  return { orderId, orderNo, total: priced.total, balanceAfter };
+}
+
+/**
+ * 차감 결과를 알 수 없던 주문을 관리자가 MIRAEPASS 포인트 내역을 보고 확정한다.
+ * paid=true: 실제로 차감됐음 → 주문번호를 부여하고 직원 화면에 새 주문으로 띄운다 (필요하면 취소해서 환불)
+ * paid=false: 차감되지 않았음 → 결제 실패로 확정
+ */
+export function resolveUnknownPayment(id: number, paid: boolean, actor: SessionUser): OrderDTO {
+  const claimed = db
+    .update(schema.orders)
+    .set(paid ? { paymentStatus: "paid" } : { paymentStatus: "failed", failReason: "PAYMENT_UNAVAILABLE" })
+    .where(and(eq(schema.orders.id, id), eq(schema.orders.paymentStatus, "unknown")))
+    .returning()
+    .get();
+  if (!claimed) {
+    getOrder(id); // 없으면 404
+    throw new ApiError("INVALID_TRANSITION", "결제 확인이 필요한 주문이 아니에요", 409);
+  }
+  if (paid) confirmPaid(id, claimed.businessDate, null);
+  logAction(id, actor, paid ? "payment_confirmed" : "payment_voided");
+  const order = getOrder(id);
+  if (paid) emit(["staff", "admin"], "order:new", order);
+  else emit("admin", "order:updated", order);
+  return order;
 }
 
 async function checkPin(customerId: number, pin: string) {
@@ -345,7 +394,13 @@ export async function transitionOrder(
 
   let refundError: string | undefined;
   if (action === "cancel" && current.paymentStatus === "paid") {
-    refundError = await refundOrder(id, actor);
+    try {
+      refundError = await refundOrder(id, actor);
+    } catch (e) {
+      // 취소는 이미 반영됐다. 환불 선점 실패(다른 기기에서 처리 중 등)는 메시지로만 알린다
+      if (!(e instanceof ApiError)) throw e;
+      refundError = e.message;
+    }
   }
 
   const order = getOrder(id);
@@ -354,11 +409,29 @@ export async function transitionOrder(
   return { order, refundError };
 }
 
-/** 환불 실행. 실패해도 예외를 던지지 않고 refund_failed로 표시한 뒤 메시지를 반환 */
+/**
+ * 환불 실행. 취소된 주문만 환불한다.
+ * 같은 주문을 두 번 지급하지 않도록 refunding으로 먼저 선점한 요청만 MIRAEPASS에 지급을 요청한다.
+ * 지급이 실패해도 예외를 던지지 않고 refund_failed로 표시한 뒤 메시지를 반환
+ */
 export async function refundOrder(id: number, actor: SessionUser): Promise<string | undefined> {
-  const o = db.select().from(schema.orders).where(eq(schema.orders.id, id)).get();
-  if (!o) throw new ApiError("NOT_FOUND", "주문을 찾을 수 없어요", 404);
-  if (o.paymentStatus !== "paid" && o.paymentStatus !== "refund_failed") {
+  const o = db
+    .update(schema.orders)
+    .set({ paymentStatus: "refunding" })
+    .where(
+      and(
+        eq(schema.orders.id, id),
+        eq(schema.orders.status, "cancelled"),
+        inArray(schema.orders.paymentStatus, ["paid", "refund_failed"]),
+      ),
+    )
+    .returning()
+    .get();
+  if (!o) {
+    const current = db.select().from(schema.orders).where(eq(schema.orders.id, id)).get();
+    if (!current) throw new ApiError("NOT_FOUND", "주문을 찾을 수 없어요", 404);
+    if (current.paymentStatus === "refunding") throw new ApiError("INVALID_TRANSITION", "이미 환불을 처리하고 있어요", 409);
+    if (current.status !== "cancelled") throw new ApiError("INVALID_TRANSITION", "취소된 주문만 환불할 수 있어요", 409);
     throw new ApiError("INVALID_TRANSITION", "환불할 수 없는 주문이에요", 409);
   }
   try {
@@ -368,9 +441,14 @@ export async function refundOrder(id: number, actor: SessionUser): Promise<strin
     return undefined;
   } catch (e) {
     const err = mapMiraepassError(e);
+    // 응답을 못 받은 경우엔 실제로 지급됐을 수 있다. 재시도 전에 MIRAEPASS 내역을 확인하도록 남긴다
+    const uncertain = e instanceof MiraepassError && e.uncertain;
+    const message = uncertain
+      ? "MIRAEPASS 응답을 받지 못했어요. 이미 지급됐을 수 있으니 MIRAEPASS 포인트 내역을 확인한 뒤 재시도해 주세요"
+      : err.message;
     db.update(schema.orders).set({ paymentStatus: "refund_failed" }).where(eq(schema.orders.id, id)).run();
-    logAction(id, actor, "refund_failed", err.message);
-    return err.message;
+    logAction(id, actor, "refund_failed", message);
+    return message;
   }
 }
 

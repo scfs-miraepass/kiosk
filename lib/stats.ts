@@ -17,6 +17,7 @@ export function getStats(from: string, to: string): StatsResponse {
     .get()!;
   const cancelled = db.select({ n: sql<number>`count(*)` }).from(o).where(and(inRange, eq(o.status, "cancelled"))).get()!.n;
   const refundFailed = db.select({ n: sql<number>`count(*)` }).from(o).where(eq(o.paymentStatus, "refund_failed")).get()!.n;
+  const paymentUnknown = db.select({ n: sql<number>`count(*)` }).from(o).where(eq(o.paymentStatus, "unknown")).get()!.n;
 
   const dailyRows = db
     .select({ date: o.businessDate, revenue: sql<number>`sum(${o.total})`, orders: sql<number>`count(*)` })
@@ -70,6 +71,7 @@ export function getStats(from: string, to: string): StatsResponse {
       avgTicket: kpiRow.orders ? Math.round(kpiRow.revenue / kpiRow.orders) : 0,
       cancelled,
       refundFailed,
+      paymentUnknown,
     },
     daily,
     hourly,
