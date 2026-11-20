@@ -17,6 +17,7 @@ from typing import Any
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("MIRAEPASS_PI_CONTROL_PORT", "8765"))
 VERSION = "1.0.0"
+ADMIN_PIN = os.environ.get("MIRAEPASS_KIOSK_ADMIN_PIN", "2580")
 
 
 def run(args: list[str], timeout: int = 20) -> subprocess.CompletedProcess[str]:
@@ -58,6 +59,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/network/status":
                 return self.ok(network_status())
             self.fail("NOT_FOUND", "unknown endpoint", 404)
+        except PermissionError as exc:
+            self.fail("UNAUTHORIZED", str(exc), 401)
         except Exception as exc:  # pragma: no cover - defensive for field devices
             self.fail("INTERNAL", str(exc), 500)
 
@@ -66,9 +69,13 @@ class Handler(BaseHTTPRequestHandler):
             body = self.read_json()
             if self.path == "/wifi/connect":
                 return self.ok(connect_wifi(str(body.get("ssid", "")), str(body.get("password", ""))))
+            if self.path == "/admin/verify":
+                return self.ok(verify_admin(str(body.get("pin", ""))))
             if self.path == "/terminal/run":
                 return self.ok(run_terminal(str(body.get("command", ""))))
             self.fail("NOT_FOUND", "unknown endpoint", 404)
+        except PermissionError as exc:
+            self.fail("UNAUTHORIZED", str(exc), 401)
         except Exception as exc:  # pragma: no cover
             self.fail("INTERNAL", str(exc), 500)
 
@@ -119,6 +126,12 @@ def connect_wifi(ssid: str, password: str) -> dict[str, Any]:
         args.extend(["password", password])
     proc = run(args, timeout=40)
     return {"code": proc.returncode, "output": proc.stdout[-8000:]}
+
+
+def verify_admin(pin: str) -> dict[str, Any]:
+    if pin != ADMIN_PIN:
+        raise PermissionError("관리자 PIN이 맞지 않아요")
+    return {"ok": True}
 
 
 def network_status() -> dict[str, Any]:

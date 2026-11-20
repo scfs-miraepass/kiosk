@@ -1,6 +1,6 @@
 "use client";
 
-import { Laptop, Loader2, RefreshCw, Terminal, Wifi } from "lucide-react";
+import { Laptop, Loader2, RefreshCw, Terminal, Wifi, X } from "lucide-react";
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ type FocusTarget = "ssid" | "wifiPassword" | "command";
 
 type Props = {
   onFocusTarget: (target: FocusTarget) => void;
+  onClose: () => void;
 };
 
 async function localApi<T>(path: string, init?: RequestInit): Promise<T> {
@@ -27,7 +28,7 @@ async function localApi<T>(path: string, init?: RequestInit): Promise<T> {
   return json.data as T;
 }
 
-export function PiControlPanel({ onFocusTarget }: Props) {
+export function PiControlPanel({ onFocusTarget, onClose }: Props) {
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [tab, setTab] = useState<"network" | "terminal">("network");
@@ -69,9 +70,14 @@ export function PiControlPanel({ onFocusTarget }: Props) {
           </h2>
           <p className="text-sm text-muted-foreground">네트워크와 터미널은 Pi의 로컬 서비스({PI_CONTROL_URL})가 처리합니다.</p>
         </div>
-        <Button type="button" variant="outline" onClick={check} className="h-11 rounded-xl">
-          <RefreshCw className="mr-2 size-4" /> 확인
-        </Button>
+        <div className="flex gap-2">
+          <Button type="button" variant="outline" onClick={check} className="h-11 rounded-xl">
+            <RefreshCw className="mr-2 size-4" /> 확인
+          </Button>
+          <Button type="button" variant="ghost" size="icon" onClick={onClose} className="size-11 rounded-xl" aria-label="관리자 모드 닫기">
+            <X className="size-5" />
+          </Button>
+        </div>
       </div>
 
       {health ? (

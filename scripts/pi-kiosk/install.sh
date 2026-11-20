@@ -15,6 +15,15 @@ if [[ -z "${CLOUD_URL}" ]]; then
   echo "CLOUD_URL이 필요합니다." >&2
   exit 1
 fi
+ADMIN_PIN="${ADMIN_PIN:-}"
+if [[ -z "${ADMIN_PIN}" && -t 0 ]]; then
+  read -rp "관리자 모드 PIN (기본 2580): " ADMIN_PIN
+fi
+ADMIN_PIN="${ADMIN_PIN:-2580}"
+if [[ ! "${ADMIN_PIN}" =~ ^[0-9]{4,8}$ ]]; then
+  echo "ADMIN_PIN은 숫자 4~8자리여야 합니다." >&2
+  exit 1
+fi
 
 if ! id "${KIOSK_USER}" >/dev/null 2>&1; then
   echo "사용자 ${KIOSK_USER}를 찾을 수 없습니다. KIOSK_USER=... 로 지정하세요." >&2
@@ -39,6 +48,10 @@ systemctl enable NetworkManager
 
 echo "==> 로컬 제어 서비스 설치"
 install -m 0755 "${SCRIPT_DIR}/miraepass-pi-control.py" /usr/local/bin/miraepass-pi-control.py
+cat >/etc/default/miraepass-pi-control <<DEFAULT
+MIRAEPASS_KIOSK_ADMIN_PIN=${ADMIN_PIN}
+DEFAULT
+chmod 0600 /etc/default/miraepass-pi-control
 cat >/etc/systemd/system/miraepass-pi-control.service <<'SERVICE'
 [Unit]
 Description=MIRAEPASS kiosk local control API
@@ -47,6 +60,7 @@ Wants=NetworkManager.service
 
 [Service]
 Type=simple
+EnvironmentFile=/etc/default/miraepass-pi-control
 ExecStart=/usr/bin/python3 /usr/local/bin/miraepass-pi-control.py
 Restart=always
 RestartSec=2
@@ -129,6 +143,7 @@ systemctl restart miraepass-pi-control.service
 echo
 echo "설치 완료"
 echo "- 키오스크 URL: ${CLOUD_URL}"
+echo "- 관리자 모드 PIN: ${ADMIN_PIN}"
 echo "- 재부팅 후 Chromium 키오스크가 자동 실행됩니다."
 echo "- 즉시 시작: sudo systemctl start miraepass-kiosk"
 echo "- 로그 확인: journalctl -u miraepass-kiosk -f"

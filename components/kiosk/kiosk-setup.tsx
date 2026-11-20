@@ -6,7 +6,9 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useIdleTimer } from "@/hooks/use-idle-timer";
+import { useLongPress } from "@/hooks/use-long-press";
 import { api, ClientApiError } from "@/lib/fetcher";
+import { KioskAdminUnlock } from "./kiosk-admin-unlock";
 import { PiControlPanel, type PiControlFocusTarget } from "./pi-control-panel";
 import { TouchKeyboard } from "./touch-keyboard";
 
@@ -33,7 +35,10 @@ export function KioskSetup({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [focusTarget, setFocusTarget] = useState<FocusTarget>("token");
+  const [adminUnlockOpen, setAdminUnlockOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
   const changing = !!onCancel;
+  const openAdminUnlock = useLongPress(() => setAdminUnlockOpen(true));
 
   // 토큰 변경 화면을 열어 둔 채 자리를 비우면 1분 뒤 주문 화면으로 돌아간다
   useIdleTimer(60, () => onCancel?.(), changing && !loading);
@@ -73,19 +78,28 @@ export function KioskSetup({
     else keyboardEvent({ target: focusTarget, backspace: true });
   };
 
+  const targetLabel: Record<FocusTarget, string> = {
+    token: "키오스크 토큰",
+    ssid: "Wi‑Fi 이름",
+    wifiPassword: "Wi‑Fi 비밀번호",
+    command: "터미널 명령",
+  };
+
   return (
     <div className="grid h-dvh grid-rows-[1fr_auto] gap-4 overflow-hidden p-5">
-      <div className="grid min-h-0 grid-cols-[minmax(360px,0.9fr)_minmax(480px,1.1fr)] gap-4 overflow-auto">
-        <form onSubmit={submit} className="space-y-6 rounded-3xl bg-white p-8 shadow-sm">
+      <div className={adminOpen ? "grid min-h-0 grid-cols-[minmax(360px,0.9fr)_minmax(480px,1.1fr)] gap-4 overflow-auto" : "flex min-h-0 items-center justify-center overflow-auto"}>
+        <form onSubmit={submit} className="w-full max-w-md space-y-6 rounded-3xl bg-white p-8 shadow-sm">
         <div className="flex flex-col items-center gap-3 text-center">
-          <MonitorSmartphone className="size-12 text-primary" />
+          <button {...openAdminUnlock} type="button" className="touch-none rounded-3xl p-2" aria-label="키오스크 기기">
+            <MonitorSmartphone className="size-12 text-primary" />
+          </button>
           <h1 className="text-2xl font-bold">{changing ? "기기 토큰 변경" : "키오스크 기기 등록"}</h1>
           <p className="text-muted-foreground">
             관리자 › 설정 화면의 키오스크 기기 토큰을 입력해 주세요.
             {changing && <> 새 토큰이 확인돼야 바뀌고, 취소하면 지금 토큰을 그대로 써요.</>}
           </p>
           <p className="rounded-2xl bg-blue-50 p-3 text-sm text-blue-900">
-            키보드·마우스 없이도 아래 터치 키보드로 토큰, Wi‑Fi, 터미널 명령을 입력할 수 있어요.
+            화면 하단 터치 키보드로 토큰을 입력할 수 있어요.
           </p>
         </div>
         {reason === "invalid" && (
@@ -117,9 +131,24 @@ export function KioskSetup({
           </Button>
         </div>
       </form>
-        <PiControlPanel onFocusTarget={setFocusTarget} />
+        {adminOpen && <PiControlPanel onFocusTarget={setFocusTarget} onClose={() => setAdminOpen(false)} />}
       </div>
-      <TouchKeyboard onInput={inputText} onBackspace={backspace} onEnter={focusTarget === "token" ? () => void submit() : undefined} disabled={loading} />
+      <TouchKeyboard
+        onInput={inputText}
+        onBackspace={backspace}
+        onEnter={focusTarget === "token" ? () => void submit() : undefined}
+        targetLabel={targetLabel[focusTarget]}
+        disabled={loading}
+      />
+      {adminUnlockOpen && (
+        <KioskAdminUnlock
+          onCancel={() => setAdminUnlockOpen(false)}
+          onUnlocked={() => {
+            setAdminUnlockOpen(false);
+            setAdminOpen(true);
+          }}
+        />
+      )}
     </div>
   );
 }
