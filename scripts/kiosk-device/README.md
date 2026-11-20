@@ -40,13 +40,13 @@ sudo CLOUD_URL=https://YOUR_DOMAIN/kiosk ADMIN_PIN=2580 ./scripts/kiosk-device/i
 sudo reboot
 ```
 
-**설치 폴더만 복사** — 버전을 알 수 없으므로 `KIOSK_VERSION`으로 직접 넘겨 주세요.
+**설치 폴더만 복사** — 폴더의 `VERSION` 파일(릴리스할 때 자동으로 맞춰짐)로 버전을 표시합니다.
 
 ```bash
 scp -r scripts/kiosk-device <사용자>@<기기 IP>:~/
 ssh <사용자>@<기기 IP>
 cd ~/kiosk-device
-sudo CLOUD_URL=https://YOUR_DOMAIN/kiosk KIOSK_VERSION=1.1.1 ./install.sh
+sudo CLOUD_URL=https://YOUR_DOMAIN/kiosk ADMIN_PIN=2580 ./install.sh
 ```
 
 ### 버전 표시
@@ -54,7 +54,7 @@ sudo CLOUD_URL=https://YOUR_DOMAIN/kiosk KIOSK_VERSION=1.1.1 ./install.sh
 관리자 모드 › 상태 › 기기 정보에 두 버전이 함께 나옵니다.
 
 - **키오스크 앱**: 클라우드 서버의 앱 버전 (빌드할 때 `package.json`에서 읽음)
-- **기기 스크립트**: 이 기기에 설치한 스크립트 버전 (설치할 때 저장소 `package.json` + git 커밋에서 읽음. 예: `v1.1.1 (커밋 a1b2c3d)`, 커밋하지 않은 수정이 있으면 "수정본")
+- **기기 스크립트**: 이 기기에 설치한 스크립트 버전. 설치할 때 `KIOSK_VERSION` → 저장소 `package.json` + git 커밋(예: `v1.1.1 (커밋 a1b2c3d)`, 커밋하지 않은 수정이 있으면 "수정본") → 폴더의 `VERSION` 파일 순으로 정합니다. 업데이트로 받으면 릴리스 버전이 됩니다.
 
 두 버전이 다르면 기기 스크립트를 삭제 후 다시 설치하라는 안내가 표시됩니다.
 
@@ -71,7 +71,7 @@ sudo CLOUD_URL=https://YOUR_DOMAIN/kiosk KIOSK_VERSION=1.1.1 ./install.sh
 | `AUTO_UPDATE` | `1` | `1`이면 매일 새벽 3:30 전후 자동 업데이트. 설치 후에는 관리자 모드 › 업데이트에서 켜고 끌 수 있습니다. |
 | `UPDATE_REPO` | 저장소 git remote, 없으면 `scfs-miraepass/kiosk` | 업데이트를 받을 GitHub 저장소 |
 | `CHROMIUM_EXTRA_FLAGS` | 라즈베리파이: `--ignore-gpu-blocklist --enable-gpu-rasterization`, 그 외: 없음 | Chromium 추가 플래그 |
-| `KIOSK_VERSION` | 저장소 `package.json` 버전 + git 커밋 | 관리자 모드에 표시할 기기 스크립트 버전 |
+| `KIOSK_VERSION` | 저장소 `package.json` 버전 + git 커밋, 없으면 `VERSION` 파일 | 관리자 모드에 표시할 기기 스크립트 버전 |
 | `SKIP_PACKAGES` | `0` | `1`이면 패키지 설치를 건너뜁니다. |
 | `REBOOT` | `0` | `1`이면 설치가 끝나고 바로 재부팅합니다. |
 
@@ -99,7 +99,8 @@ sudo CLOUD_URL=https://YOUR_DOMAIN/kiosk KIOSK_VERSION=1.1.1 ./install.sh
 > 릴리스 태그에 `scripts/kiosk-device`가 들어 있어야 업데이트할 수 있습니다. 이 기능이 처음 들어간 릴리스부터 동작합니다.
 
 안전장치
-- 받은 파일은 GitHub가 알려 준 git blob 해시로 하나씩 검증합니다 (HTTPS로만 받음).
+- 확인과 파일 받기 모두 `api.github.com`만 씁니다 (파일은 git blob API로 받음). `raw.githubusercontent.com`은 인증서 체인이 달라 일부 기기·망에서 `CERTIFICATE_VERIFY_FAILED`가 나기 때문입니다.
+- 받은 파일은 GitHub가 알려 준 git blob 해시로 하나씩 검증합니다.
 - 적용 전에 덮어쓸 파일(방화벽 규칙·터치 설정 포함)을 백업하고, 적용 실패·시간 초과·적용 후 로컬 서비스 무응답이면 자동으로 되돌립니다. 업데이트가 새로 만든 파일은 지웁니다.
 - 적용은 별도 서비스(`miraepass-kiosk-update.service`)가 하므로 중간에 로컬 서비스가 다시 시작돼도 계속됩니다.
 - 화면 관련 파일이 실제로 바뀐 경우에만 키오스크 화면을 다시 시작합니다.
@@ -107,6 +108,10 @@ sudo CLOUD_URL=https://YOUR_DOMAIN/kiosk KIOSK_VERSION=1.1.1 ./install.sh
 - 다른 저장소(포크 등)에서 받으려면 처음 설치할 때 `UPDATE_REPO=owner/repo`를 지정합니다.
 
 기록: `/var/lib/miraepass/update/update.log`, `journalctl -u miraepass-kiosk-update`
+
+인증서 오류(`GitHub 인증서를 확인하지 못했어요`)가 나면 오류에 함께 나오는 원인과 기기 시간을 확인하세요.
+- **기기 시간이 틀림** (`certificate is not yet valid` / `has expired`): 라즈베리파이는 RTC가 없어 시간 동기화(NTP)가 안 되면 시간이 틀어집니다. `timedatectl`로 `System clock synchronized: yes`인지 확인하고, 망에서 NTP(UDP 123)가 막혀 있으면 허용해 주세요. 설치 스크립트는 NTP 동기화를 켭니다.
+- **그 밖** (`unable to get local issuer certificate` 등): 회사·학교망의 HTTPS 검사 장비가 인증서를 바꾸는 경우가 많습니다. 해당 장비의 루트 인증서를 `/usr/local/share/ca-certificates/`에 넣고 `sudo update-ca-certificates`를 실행하거나, GitHub를 검사 예외로 등록해 주세요. `sudo apt install --reinstall ca-certificates`로 기본 인증서도 확인해 주세요.
 
 ## 다시 설치
 
