@@ -61,7 +61,7 @@ export function TouchKeyboard({ onInput, onBackspace, onEnter, onClose, targetLa
 
   return (
     <div
-      className="fixed z-40 select-none rounded-[1.5rem] border border-white/10 bg-slate-950 p-3 shadow-2xl shadow-slate-900/35"
+      className="fixed z-[60] select-none rounded-[1.5rem] border border-white/10 bg-slate-950 p-3 shadow-2xl shadow-slate-900/35"
       style={{ left: current.x, top: current.y, width: KEYBOARD_WIDTH }}
     >
       <div className="mb-2 flex items-center justify-between gap-3 rounded-2xl bg-white/8 px-3 py-2">

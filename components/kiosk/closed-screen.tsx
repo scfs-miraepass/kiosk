@@ -5,7 +5,7 @@ import { useLongPress } from "@/hooks/use-long-press";
 import type { StoreStatus } from "@/lib/types";
 
 export function ClosedScreen({ status, onLongPress }: { status: StoreStatus; onLongPress: () => void }) {
-  // 영업시간 밖에도 기기 토큰을 바꿀 수 있도록 달 아이콘에 숨은 길게 누르기
+  // 영업시간 밖에도 관리자 모드에 들어갈 수 있도록 달 아이콘에 숨은 길게 누르기
   const longPress = useLongPress(onLongPress);
   return (
     <div className="flex h-dvh flex-col items-center justify-center gap-6 bg-gradient-to-b from-slate-100 to-slate-200 px-6 text-center select-none">

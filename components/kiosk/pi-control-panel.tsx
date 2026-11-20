@@ -1,22 +1,24 @@
 "use client";
 
-import { Laptop, Loader2, Power, RefreshCw, RotateCw, Wifi, X } from "lucide-react";
+import { KeyRound, Laptop, Loader2, Power, RefreshCw, RotateCw, Wifi, X } from "lucide-react";
 import type React from "react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { api, ClientApiError } from "@/lib/fetcher";
 
 const PI_CONTROL_URL = "http://127.0.0.1:8765";
 
 type WifiNetwork = { ssid: string; security: string; signal: number };
 type Health = { ok: boolean; hostname?: string; user?: string; version?: string };
 
-type FocusTarget = "ssid" | "wifiPassword" | "wifiIdentity";
+type FocusTarget = "adminToken" | "ssid" | "wifiPassword" | "wifiIdentity";
 
 type Props = {
   onFocusTarget: (target: FocusTarget) => void;
   onInputBlur: () => void;
   onClose: () => void;
+  onTokenRegistered?: (token: string) => void;
 };
 
 async function localApi<T>(path: string, init?: RequestInit): Promise<T> {
@@ -29,7 +31,7 @@ async function localApi<T>(path: string, init?: RequestInit): Promise<T> {
   return json.data as T;
 }
 
-export function PiControlPanel({ onFocusTarget, onInputBlur, onClose }: Props) {
+export function PiControlPanel({ onFocusTarget, onInputBlur, onClose, onTokenRegistered }: Props) {
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
 
@@ -91,15 +93,82 @@ export function PiControlPanel({ onFocusTarget, onInputBlur, onClose }: Props) {
       )}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <div className="rounded-3xl border bg-slate-50 p-4">
-          <h3 className="mb-4 flex items-center gap-2 text-lg font-extrabold">
-            <Wifi className="size-5 text-primary" /> 네트워크 설정
-          </h3>
-          <NetworkPanel disabled={!health} onFocusTarget={onFocusTarget} onInputBlur={onInputBlur} />
+        <div className="space-y-4">
+          {onTokenRegistered && (
+            <TokenResetPanel onFocusTarget={onFocusTarget} onInputBlur={onInputBlur} onTokenRegistered={onTokenRegistered} />
+          )}
+          <div className="rounded-3xl border bg-slate-50 p-4">
+            <h3 className="mb-4 flex items-center gap-2 text-lg font-extrabold">
+              <Wifi className="size-5 text-primary" /> 네트워크 설정
+            </h3>
+            <NetworkPanel disabled={!health} onFocusTarget={onFocusTarget} onInputBlur={onInputBlur} />
+          </div>
         </div>
         <SystemPanel disabled={!health} onClose={onClose} />
       </div>
     </section>
+  );
+}
+
+function TokenResetPanel({
+  onFocusTarget,
+  onInputBlur,
+  onTokenRegistered,
+}: {
+  onFocusTarget: (target: FocusTarget) => void;
+  onInputBlur: () => void;
+  onTokenRegistered: (token: string) => void;
+}) {
+  const [token, setToken] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useKioskTextInput("adminToken", setToken);
+
+  const submit = async () => {
+    const next = token.trim();
+    if (!next) return;
+    setLoading(true);
+    setMessage(null);
+    try {
+      await api("/api/kiosk/verify", { method: "POST", kiosk: next });
+      onTokenRegistered(next);
+      setMessage("키오스크 토큰을 변경했어요.");
+      setToken("");
+    } catch (err) {
+      setMessage(
+        err instanceof ClientApiError && err.code === "KIOSK_UNREGISTERED"
+          ? "토큰이 맞지 않아요. 관리자 › 설정의 기기 토큰을 확인해 주세요"
+          : err instanceof ClientApiError
+            ? err.message
+            : "토큰 확인에 실패했어요",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="rounded-3xl border bg-slate-50 p-4">
+      <h3 className="mb-4 flex items-center gap-2 text-lg font-extrabold">
+        <KeyRound className="size-5 text-primary" /> 키오스크 토큰 재설정
+      </h3>
+      <div className="grid grid-cols-[1fr_auto] gap-2">
+        <Input
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          onFocus={() => onFocusTarget("adminToken")}
+          onBlur={onInputBlur}
+          placeholder="새 키오스크 토큰"
+          className="h-12 text-base"
+          disabled={loading}
+        />
+        <Button type="button" onClick={() => void submit()} disabled={!token.trim() || loading} className="h-12 rounded-xl">
+          {loading ? <Loader2 className="size-4 animate-spin" /> : "변경"}
+        </Button>
+      </div>
+      {message && <p className="mt-3 rounded-2xl bg-white p-3 text-sm text-slate-700">{message}</p>}
+    </div>
   );
 }
 

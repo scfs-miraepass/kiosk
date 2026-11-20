@@ -3,7 +3,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { Loader2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useMenu, usePublicSettings, useStoreStatus } from "@/hooks/queries";
 import { useIdleTimer } from "@/hooks/use-idle-timer";
 import { useSocket } from "@/hooks/use-socket";
@@ -24,10 +24,13 @@ import { ClosedScreen } from "./closed-screen";
 import { DoneScreen } from "./done-screen";
 import { ErrorScreen } from "./error-screen";
 import { IdentifyScreen } from "./identify-screen";
+import { KioskAdminUnlock } from "./kiosk-admin-unlock";
 import { KioskSetup } from "./kiosk-setup";
 import { MenuScreen } from "./menu-screen";
+import { PiControlPanel, type PiControlFocusTarget } from "./pi-control-panel";
 import { PinScreen } from "./pin-screen";
 import { ReviewScreen } from "./review-screen";
+import { TouchKeyboard } from "./touch-keyboard";
 
 /** 입력 중인 단계: 이때만 무입력 타이머로 대기화면 복귀 */
 const INTERACTIVE: KioskStep[] = ["menu", "review", "identify", "pin", "error"];
@@ -74,13 +77,15 @@ export function KioskApp() {
 
   if (!mounted) return <FullscreenLoader />;
   if (!token) return <KioskSetup reason={setup} onRegistered={registered} />;
-  if (setup === "manual") return <KioskSetup reason={setup} onRegistered={registered} onCancel={() => setSetup(null)} />;
   return <KioskFlow token={token} />;
 }
+
+type AdminFocusTarget = PiControlFocusTarget;
 
 function KioskFlow({ token }: { token: string }) {
   const qc = useQueryClient();
   const [step, setStep] = useAtom(stepAtom);
+  const setToken = useSetAtom(kioskTokenAtom);
   const reset = useSetAtom(resetKioskAtom);
   const syncCart = useSetAtom(syncCartWithMenuAtom);
   const paying = useAtomValue(paymentPendingAtom);
@@ -89,8 +94,12 @@ function KioskFlow({ token }: { token: string }) {
   const status = useStoreStatus();
   const settings = usePublicSettings();
   const setTokenSetup = useSetAtom(tokenSetupAtom);
-  // 직원용 숨은 동작: 로고(영업 종료 화면은 달 아이콘)를 5초 동안 누르면 기기 토큰 변경 화면
-  const openTokenSetup = useCallback(() => setTokenSetup("manual"), [setTokenSetup]);
+  const [adminUnlockOpen, setAdminUnlockOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [focusTarget, setFocusTarget] = useState<AdminFocusTarget>("adminToken");
+  // 직원용 숨은 동작: 로고(영업 종료 화면은 달 아이콘)를 5초 동안 누르면 관리자 PIN 확인
+  const openAdminUnlock = useCallback(() => setAdminUnlockOpen(true), []);
 
   // 켜질 때 저장된 토큰이 아직 유효한지 확인 (손님이 주문을 다 한 뒤에야 실패하지 않도록)
   useEffect(() => {
@@ -127,6 +136,19 @@ function KioskFlow({ token }: { token: string }) {
   const kiosk = settings.data?.kiosk ?? { idleSeconds: 60, doneSeconds: 10, shufflePinPad: true };
   const goHome = useCallback(() => reset("attract"), [reset]);
   const finish = useCallback(() => reset("attract"), [reset]);
+  const focusAdminInput = useCallback((target: AdminFocusTarget) => {
+    setFocusTarget(target);
+    setKeyboardOpen(true);
+  }, []);
+  const adminKeyboardEvent = (detail: { target: AdminFocusTarget; value?: string; backspace?: boolean }) => {
+    window.dispatchEvent(new CustomEvent("mp-cafe:kiosk-keyboard", { detail }));
+  };
+  const targetLabel: Record<AdminFocusTarget, string> = {
+    adminToken: "키오스크 토큰",
+    ssid: "Wi‑Fi 이름",
+    wifiIdentity: "Enterprise ID",
+    wifiPassword: "Wi‑Fi 비밀번호",
+  };
 
   useIdleTimer(kiosk.idleSeconds, goHome, INTERACTIVE.includes(step) && !paying);
 
@@ -146,17 +168,66 @@ function KioskFlow({ token }: { token: string }) {
       </div>
     );
   }
-  if (closed && !locked) return <ClosedScreen status={status.data!} onLongPress={openTokenSetup} />;
+  const adminLayer = (
+    <>
+      {adminUnlockOpen && (
+        <KioskAdminUnlock
+          onCancel={() => setAdminUnlockOpen(false)}
+          onUnlocked={() => {
+            setAdminUnlockOpen(false);
+            setAdminOpen(true);
+          }}
+        />
+      )}
+      {adminOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-5">
+          <PiControlPanel
+            onFocusTarget={focusAdminInput}
+            onInputBlur={() => setKeyboardOpen(false)}
+            onClose={() => {
+              setAdminOpen(false);
+              setKeyboardOpen(false);
+              reset("attract");
+            }}
+            onTokenRegistered={(next) => {
+              setToken(next);
+              setTokenSetup(null);
+              reset("attract");
+            }}
+          />
+        </div>
+      )}
+      {adminOpen && keyboardOpen && (
+        <TouchKeyboard
+          onInput={(value) => adminKeyboardEvent({ target: focusTarget, value })}
+          onBackspace={() => adminKeyboardEvent({ target: focusTarget, backspace: true })}
+          onEnter={() => setKeyboardOpen(false)}
+          onClose={() => setKeyboardOpen(false)}
+          targetLabel={targetLabel[focusTarget]}
+        />
+      )}
+    </>
+  );
+
+  if (closed && !locked) {
+    return (
+      <>
+        <ClosedScreen status={status.data!} onLongPress={openAdminUnlock} />
+        {adminLayer}
+      </>
+    );
+  }
 
   return (
     <div className="kiosk-surface h-dvh overflow-hidden">
       {step === "attract" && <AttractScreen menu={menu.data} onStart={() => setStep("menu")} />}
-      {step === "menu" && <MenuScreen menu={menu.data} onHome={goHome} onLogoLongPress={openTokenSetup} />}
+      {step === "menu" && <MenuScreen menu={menu.data} onHome={goHome} onLogoLongPress={openAdminUnlock} />}
       {step === "review" && <ReviewScreen onHome={goHome} />}
       {step === "identify" && <IdentifyScreen onHome={goHome} />}
       {step === "pin" && <PinScreen shuffle={kiosk.shufflePinPad} onHome={goHome} />}
       {step === "done" && <DoneScreen seconds={kiosk.doneSeconds} onFinish={finish} />}
       {step === "error" && <ErrorScreen onHome={goHome} />}
+      {adminLayer}
     </div>
   );
 }
