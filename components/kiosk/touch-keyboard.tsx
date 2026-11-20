@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowBigUp, Check, Delete, GripHorizontal, Space } from "lucide-react";
+import { ArrowBigUp, Check, Delete, GripHorizontal, Space, X } from "lucide-react";
 import type React from "react";
 import { useRef, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -9,6 +9,7 @@ type Props = {
   onInput: (value: string) => void;
   onBackspace: () => void;
   onEnter?: () => void;
+  onClose?: () => void;
   targetLabel?: string;
   disabled?: boolean;
 };
@@ -19,7 +20,7 @@ const quick = [".", "-", "_", "@", "/"];
 const KEYBOARD_WIDTH = 720;
 const KEYBOARD_HEIGHT = 300;
 
-export function TouchKeyboard({ onInput, onBackspace, onEnter, targetLabel = "입력", disabled }: Props) {
+export function TouchKeyboard({ onInput, onBackspace, onEnter, onClose, targetLabel = "입력", disabled }: Props) {
   const [shift, setShift] = useState(false);
   const [symbolMode, setSymbolMode] = useState(false);
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
@@ -80,6 +81,7 @@ export function TouchKeyboard({ onInput, onBackspace, onEnter, targetLabel = "�
           {quick.map((key) => (
             <Key key={key} label={key} onClick={() => onInput(key)} disabled={disabled} compact />
           ))}
+          {onClose && <Key label="닫기" icon={<X className="size-4" />} onClick={onClose} disabled={disabled} compact />}
         </div>
       </div>
       <div className="space-y-1.5">

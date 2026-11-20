@@ -1,8 +1,8 @@
 "use client";
 
-import { Laptop, Loader2, RefreshCw, Terminal, Wifi, X } from "lucide-react";
+import { Laptop, Loader2, Power, RefreshCw, RotateCw, Wifi, X } from "lucide-react";
 import type React from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -11,7 +11,7 @@ const PI_CONTROL_URL = "http://127.0.0.1:8765";
 type WifiNetwork = { ssid: string; security: string; signal: number };
 type Health = { ok: boolean; hostname?: string; user?: string; version?: string };
 
-type FocusTarget = "ssid" | "wifiPassword" | "command";
+type FocusTarget = "ssid" | "wifiPassword";
 
 type Props = {
   onFocusTarget: (target: FocusTarget) => void;
@@ -31,7 +31,6 @@ async function localApi<T>(path: string, init?: RequestInit): Promise<T> {
 export function PiControlPanel({ onFocusTarget, onClose }: Props) {
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"network" | "terminal">("network");
 
   const check = async () => {
     setHealthError(null);
@@ -62,20 +61,20 @@ export function PiControlPanel({ onFocusTarget, onClose }: Props) {
   }, []);
 
   return (
-    <section className="rounded-3xl bg-white p-5 shadow-sm">
+    <section className="w-full max-w-5xl rounded-3xl bg-white p-6 shadow-sm">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <h2 className="flex items-center gap-2 text-xl font-bold">
-            <Laptop className="size-6 text-primary" /> 라즈베리파이 설정
+            <Laptop className="size-6 text-primary" /> 키오스크 관리자 모드
           </h2>
-          <p className="text-sm text-muted-foreground">네트워크와 터미널은 Pi의 로컬 서비스({PI_CONTROL_URL})가 처리합니다.</p>
+          <p className="text-sm text-muted-foreground">네트워크 설정과 전원 제어는 Pi의 로컬 서비스({PI_CONTROL_URL})가 처리합니다.</p>
         </div>
         <div className="flex gap-2">
           <Button type="button" variant="outline" onClick={check} className="h-11 rounded-xl">
             <RefreshCw className="mr-2 size-4" /> 확인
           </Button>
-          <Button type="button" variant="ghost" size="icon" onClick={onClose} className="size-11 rounded-xl" aria-label="관리자 모드 닫기">
-            <X className="size-5" />
+          <Button type="button" variant="default" onClick={onClose} className="h-11 rounded-xl">
+            <X className="mr-2 size-4" /> 키오스크로 돌아가기
           </Button>
         </div>
       </div>
@@ -90,26 +89,16 @@ export function PiControlPanel({ onFocusTarget, onClose }: Props) {
         </p>
       )}
 
-      <div className="mb-4 grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
-        <TabButton active={tab === "network"} onClick={() => setTab("network")} icon={<Wifi className="size-4" />}>
-          네트워크
-        </TabButton>
-        <TabButton active={tab === "terminal"} onClick={() => setTab("terminal")} icon={<Terminal className="size-4" />}>
-          터미널
-        </TabButton>
+      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+        <div className="rounded-3xl border bg-slate-50 p-4">
+          <h3 className="mb-4 flex items-center gap-2 text-lg font-extrabold">
+            <Wifi className="size-5 text-primary" /> 네트워크 설정
+          </h3>
+          <NetworkPanel disabled={!health} onFocusTarget={onFocusTarget} />
+        </div>
+        <SystemPanel disabled={!health} onClose={onClose} />
       </div>
-
-      {tab === "network" ? <NetworkPanel disabled={!health} onFocusTarget={onFocusTarget} /> : <TerminalPanel disabled={!health} onFocusTarget={onFocusTarget} />}
     </section>
-  );
-}
-
-function TabButton({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <Button type="button" variant={active ? "default" : "ghost"} className="h-12 rounded-xl text-base" onClick={onClick}>
-      {icon}
-      <span className="ml-2">{children}</span>
-    </Button>
   );
 }
 
@@ -183,43 +172,40 @@ function NetworkPanel({ disabled, onFocusTarget }: { disabled: boolean; onFocusT
   );
 }
 
-function TerminalPanel({ disabled, onFocusTarget }: { disabled: boolean; onFocusTarget: (target: FocusTarget) => void }) {
-  const quick = useMemo(() => ["ip addr", "nmcli device status", "journalctl -u miraepass-kiosk -n 80 --no-pager", "sudo systemctl restart miraepass-kiosk"], []);
-  const [command, setCommand] = useState(quick[0]);
-  const [output, setOutput] = useState("");
+function SystemPanel({ disabled, onClose }: { disabled: boolean; onClose: () => void }) {
+  const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  useKioskTextInput("command", setCommand);
-
-  const run = async () => {
-    if (!command.trim()) return;
+  const power = async (action: "reboot" | "shutdown") => {
+    const label = action === "reboot" ? "재부팅" : "종료";
+    if (!window.confirm(`키오스크를 ${label}할까요?`)) return;
     setLoading(true);
+    setMessage(null);
     try {
-      const result = await localApi<{ code: number; output: string }>("/terminal/run", { method: "POST", body: JSON.stringify({ command }) });
-      setOutput(`$ ${command}\n(exit ${result.code})\n${result.output}`);
+      await localApi(`/system/${action}`, { method: "POST", body: JSON.stringify({}) });
+      setMessage(`${label} 명령을 보냈어요.`);
     } catch (e) {
-      setOutput(e instanceof Error ? e.message : "명령 실행에 실패했어요");
+      setMessage(e instanceof Error ? e.message : `${label} 명령에 실패했어요`);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap gap-2">
-        {quick.map((q) => (
-          <Button key={q} type="button" variant="outline" onClick={() => setCommand(q)} className="rounded-xl" disabled={disabled || loading}>
-            {q}
-          </Button>
-        ))}
-      </div>
-      <div className="grid grid-cols-[1fr_auto] gap-2">
-        <Input value={command} onChange={(e) => setCommand(e.target.value)} onFocus={() => onFocusTarget("command")} className="h-12 font-mono text-base" disabled={disabled || loading} />
-        <Button type="button" onClick={run} disabled={disabled || loading || !command.trim()} className="h-12 rounded-xl">
-          {loading ? <Loader2 className="size-4 animate-spin" /> : "실행"}
+    <div className="rounded-3xl border bg-slate-50 p-4">
+      <h3 className="mb-4 text-lg font-extrabold">전원 / 화면</h3>
+      <div className="space-y-3">
+        <Button type="button" variant="outline" className="h-14 w-full justify-start rounded-2xl text-base" onClick={onClose}>
+          <X className="mr-3 size-5" /> 키오스크로 돌아가기
+        </Button>
+        <Button type="button" variant="outline" className="h-14 w-full justify-start rounded-2xl text-base" onClick={() => void power("reboot")} disabled={disabled || loading}>
+          <RotateCw className="mr-3 size-5" /> 재부팅
+        </Button>
+        <Button type="button" variant="destructive" className="h-14 w-full justify-start rounded-2xl text-base" onClick={() => void power("shutdown")} disabled={disabled || loading}>
+          <Power className="mr-3 size-5" /> 종료
         </Button>
       </div>
-      <pre className="min-h-52 max-h-72 overflow-auto rounded-2xl bg-slate-950 p-4 text-sm text-green-100">{output || "명령 결과가 여기에 표시됩니다."}</pre>
+      {message && <p className="mt-4 rounded-2xl bg-white p-3 text-sm text-slate-700">{message}</p>}
     </div>
   );
 }

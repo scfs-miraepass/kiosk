@@ -18,6 +18,7 @@ HOST = "127.0.0.1"
 PORT = int(os.environ.get("MIRAEPASS_PI_CONTROL_PORT", "8765"))
 VERSION = "1.0.0"
 ADMIN_PIN = os.environ.get("MIRAEPASS_KIOSK_ADMIN_PIN", "2580")
+ALLOW_POWER = os.environ.get("MIRAEPASS_PI_ALLOW_POWER") == "1"
 
 
 def run(args: list[str], timeout: int = 20) -> subprocess.CompletedProcess[str]:
@@ -73,6 +74,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.ok(verify_admin(str(body.get("pin", ""))))
             if self.path == "/terminal/run":
                 return self.ok(run_terminal(str(body.get("command", ""))))
+            if self.path == "/system/reboot":
+                return self.ok(power_action("reboot"))
+            if self.path == "/system/shutdown":
+                return self.ok(power_action("shutdown"))
             self.fail("NOT_FOUND", "unknown endpoint", 404)
         except PermissionError as exc:
             self.fail("UNAUTHORIZED", str(exc), 401)
@@ -148,6 +153,18 @@ def run_terminal(command: str) -> dict[str, Any]:
         raise RuntimeError("command is required")
     proc = shell(command, timeout=30)
     return {"code": proc.returncode, "output": proc.stdout[-12000:]}
+
+
+def power_action(action: str) -> dict[str, Any]:
+    if not ALLOW_POWER:
+        raise PermissionError("전원 제어는 설치된 키오스크 서비스에서만 사용할 수 있어요")
+    if action == "reboot":
+        proc = run(["systemctl", "reboot"], timeout=5)
+    elif action == "shutdown":
+        proc = run(["systemctl", "poweroff"], timeout=5)
+    else:
+        raise RuntimeError("unknown power action")
+    return {"code": proc.returncode, "output": proc.stdout[-2000:]}
 
 
 def main() -> None:

@@ -18,7 +18,7 @@ sudo reboot
 - `miraepass-kiosk.service`: Xorg/openbox/Chromium 키오스크 자동 실행
 - `miraepass-pi-control.service`: 키오스크 화면에서 호출하는 로컬 설정 API
 
-로컬 설정 API는 `127.0.0.1:8765`에만 바인딩됩니다. 클라우드 페이지가 Pi의 Chromium 안에서 실행될 때만 `localhost`로 호출해 Wi‑Fi 검색/연결과 간단한 터미널 명령 실행을 제공합니다.
+로컬 설정 API는 `127.0.0.1:8765`에만 바인딩됩니다. 클라우드 페이지가 Pi의 Chromium 안에서 실행될 때만 `localhost`로 호출해 Wi‑Fi 검색/연결, 재부팅, 종료를 제공합니다.
 
 ## 운영 명령
 
@@ -33,8 +33,9 @@ journalctl -u miraepass-pi-control -f
 
 키오스크 최초 등록 화면에서 기기 아이콘을 5초 이상 길게 누른 뒤 관리자 PIN을 입력하면 관리자 모드가 열립니다. 관리자 모드에서는 다음을 터치로 사용할 수 있습니다.
 
-- 키오스크 토큰 입력
 - Wi‑Fi 검색/SSID/비밀번호 입력 및 연결
-- `ip addr`, `nmcli device status`, 서비스 재시작 등 터미널 명령 실행
+- 키오스크로 돌아가기
+- 재부팅
+- 종료
 
-모든 입력은 화면 하단의 터치 키보드로 할 수 있습니다.
+기기 토큰과 Wi‑Fi 입력칸을 누르면 플로팅 터치 키보드가 열리고, 상단 바를 잡아 원하는 위치로 옮길 수 있습니다.

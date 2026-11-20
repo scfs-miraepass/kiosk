@@ -74,7 +74,7 @@ sudo CLOUD_URL=https://<서버주소>/kiosk ADMIN_PIN=2580 ./scripts/pi-kiosk/in
 sudo reboot
 ```
 
-설치 후 키오스크 최초 등록 화면에서 터치 키보드로 기기 토큰을 입력할 수 있습니다. Wi‑Fi와 터미널은 기기 아이콘을 5초 이상 길게 눌러 관리자 PIN을 확인한 뒤 사용할 수 있습니다. 자세한 내용은 `scripts/pi-kiosk/README.md`를 보세요.
+설치 후 키오스크 최초 등록 화면에서 터치 키보드로 기기 토큰을 입력할 수 있습니다. Wi‑Fi, 재부팅, 종료는 기기 아이콘을 5초 이상 길게 눌러 관리자 PIN을 확인한 뒤 사용할 수 있습니다. 자세한 내용은 `scripts/pi-kiosk/README.md`를 보세요.
 
 ```bash
 chromium-browser --kiosk --noerrdialogs --disable-infobars --no-first-run \

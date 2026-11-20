@@ -50,6 +50,7 @@ echo "==> 로컬 제어 서비스 설치"
 install -m 0755 "${SCRIPT_DIR}/miraepass-pi-control.py" /usr/local/bin/miraepass-pi-control.py
 cat >/etc/default/miraepass-pi-control <<DEFAULT
 MIRAEPASS_KIOSK_ADMIN_PIN=${ADMIN_PIN}
+MIRAEPASS_PI_ALLOW_POWER=1
 DEFAULT
 chmod 0600 /etc/default/miraepass-pi-control
 cat >/etc/systemd/system/miraepass-pi-control.service <<'SERVICE'

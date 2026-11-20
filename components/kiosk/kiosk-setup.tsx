@@ -35,6 +35,7 @@ export function KioskSetup({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [focusTarget, setFocusTarget] = useState<FocusTarget>("token");
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [adminUnlockOpen, setAdminUnlockOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const changing = !!onCancel;
@@ -82,12 +83,28 @@ export function KioskSetup({
     token: "키오스크 토큰",
     ssid: "Wi‑Fi 이름",
     wifiPassword: "Wi‑Fi 비밀번호",
-    command: "터미널 명령",
+  };
+
+  const focus = (target: FocusTarget) => {
+    setFocusTarget(target);
+    setKeyboardOpen(true);
+  };
+
+  const closeAdmin = () => {
+    setAdminOpen(false);
+    setKeyboardOpen(false);
+    onCancel?.();
   };
 
   return (
-    <div className="grid h-dvh grid-rows-[1fr_auto] gap-4 overflow-hidden p-5">
-      <div className={adminOpen ? "grid min-h-0 grid-cols-[minmax(360px,0.9fr)_minmax(480px,1.1fr)] gap-4 overflow-auto" : "flex min-h-0 items-center justify-center overflow-auto"}>
+    <div className="h-dvh overflow-hidden p-5">
+      <div className="flex h-full min-h-0 items-center justify-center overflow-auto">
+        {adminOpen ? (
+          <PiControlPanel
+            onFocusTarget={focus}
+            onClose={closeAdmin}
+          />
+        ) : (
         <form onSubmit={submit} className="w-full max-w-md space-y-6 rounded-3xl bg-white p-8 shadow-sm">
         <div className="flex flex-col items-center gap-3 text-center">
           <button {...openAdminUnlock} type="button" className="touch-none rounded-3xl p-2" aria-label="키오스크 기기">
@@ -111,7 +128,7 @@ export function KioskSetup({
         <Input
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          onFocus={() => setFocusTarget("token")}
+          onFocus={() => focus("token")}
           placeholder={changing ? "새 기기 토큰" : "기기 토큰"}
           className="h-14 text-lg"
           autoComplete="off"
@@ -131,15 +148,18 @@ export function KioskSetup({
           </Button>
         </div>
       </form>
-        {adminOpen && <PiControlPanel onFocusTarget={setFocusTarget} onClose={() => setAdminOpen(false)} />}
+        )}
       </div>
-      <TouchKeyboard
-        onInput={inputText}
-        onBackspace={backspace}
-        onEnter={focusTarget === "token" ? () => void submit() : undefined}
-        targetLabel={targetLabel[focusTarget]}
-        disabled={loading}
-      />
+      {keyboardOpen && (
+        <TouchKeyboard
+          onInput={inputText}
+          onBackspace={backspace}
+          onEnter={focusTarget === "token" ? () => void submit() : () => setKeyboardOpen(false)}
+          onClose={() => setKeyboardOpen(false)}
+          targetLabel={targetLabel[focusTarget]}
+          disabled={loading}
+        />
+      )}
       {adminUnlockOpen && (
         <KioskAdminUnlock
           onCancel={() => setAdminUnlockOpen(false)}
