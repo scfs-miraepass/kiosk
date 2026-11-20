@@ -46,6 +46,7 @@ sudo reboot
 | `WIFI_COUNTRY` | `KR` | Wi‑Fi 국가 코드. Raspberry Pi OS Lite는 이 값이 없으면 무선이 막혀 있습니다. |
 | `DISPLAY_ROTATE` | `normal` | 처음 화면 방향 `normal`·`left`·`right`·`inverted`. 이후에는 관리자 모드 › 화면에서 바꿀 수 있고, 재설치해도 그 값이 유지됩니다. |
 | `HIDE_CURSOR` | `1` | `1`이면 마우스 커서를 숨깁니다 (터치 전용). |
+| `FIREWALL` | `1` | `1`이면 들어오는 연결을 모두 차단하는 방화벽을 켭니다. SSH가 켜져 있으면 SSH 포트만 허용합니다. 재설치할 때 생략하면 이전 상태(관리자 모드에서 바꾼 값)를 따릅니다. |
 | `NM_TAKEOVER` | `0` | `1`이면 다음 부팅부터 NetworkManager로 전환합니다 (위 설명 참고). |
 | `SKIP_PACKAGES` | `0` | `1`이면 패키지 설치를 건너뜁니다. |
 | `REBOOT` | `0` | `1`이면 설치가 끝나고 바로 재부팅합니다. |
@@ -71,6 +72,7 @@ Chromium 플래그는 `/etc/default/miraepass-kiosk`의 `CHROMIUM_EXTRA_FLAGS`�
 
 - `miraepass-kiosk.service`: tty1에서 Xorg → openbox → Chromium 키오스크를 자동 실행
 - `miraepass-kiosk-control.service`: 관리자 모드가 호출하는 로컬 설정 API (`127.0.0.1:8765`에만 바인딩)
+- `miraepass-firewall.service` + `/etc/miraepass/firewall.nft`: nftables 전용 테이블(`inet miraepass_kiosk`)로 들어오는 연결 차단. 나가는 연결과 그 응답, loopback, IPv6 필수 ICMPv6/DHCPv6만 허용하고, SSH가 켜져 있으면 SSH 포트를 허용 (ufw·firewalld와 함께 써도 서로 덮어쓰지 않음)
 - `/usr/local/bin/miraepass-kiosk-rotate`: 화면·터치 회전 스크립트 (부팅 시와 관리자 모드에서 공통 사용)
 
 > 이전 이름(`scripts/pi-kiosk`, `miraepass-pi-control`)으로 설치한 기기는 새 스크립트로 다시 설치하면 서비스가 자동으로 교체되고 관리자 PIN도 이어집니다.
@@ -98,9 +100,25 @@ nmcli device status                          # 네트워크 상태 확인
 | 유선 LAN | 현재 IP·게이트웨이·DNS 확인, DHCP 자동 / 고정 IP(IP, 서브넷 마스크, 게이트웨이, DNS) |
 | Wi‑Fi | 주변 네트워크 검색, WPA-Personal / WPA-Enterprise(PEAP·MSCHAPv2) 연결, 숨겨진 네트워크 직접 입력 |
 | 화면 | 화면 방향(기본·오른쪽 90°·왼쪽 90°·180°) 변경. 터치 좌표도 함께 돌리며, 15초 안에 ‘유지’를 누르지 않으면 자동으로 되돌아감 |
+| 보안 | 방화벽 켜기/끄기, SSH 원격 접속 켜기/끄기. 방화벽이 켜진 상태에서 SSH를 켜면 SSH 포트만 자동으로 열림 |
 | 기기 토큰 | 키오스크 기기 토큰 재등록 (서버에서 확인된 토큰만 저장) |
 | 전원 | 키오스크 화면 새로고침, 재부팅, 종료 (확인 후 실행) |
 
 입력칸을 누르면 플로팅 터치 키보드가 열리고, 상단 바를 잡아 원하는 위치로 옮길 수 있습니다.
 
 > 관리자 모드 자체는 클라우드 키오스크 페이지 안에 있으므로, 처음 설치한 장소와 다른 네트워크로 옮길 때는 유선 LAN(DHCP)으로 먼저 연결하거나 SSH에서 `sudo nmtui`로 설정하세요.
+
+## 로컬 서비스 보안
+
+- `127.0.0.1`에만 바인딩되어 기기 밖에서는 접속할 수 없습니다.
+- 브라우저 요청은 `CLOUD_URL`의 출처(origin)와 이 기기에서 연 페이지만 허용합니다. 다른 출처를 더 허용하려면 `/etc/default/miraepass-kiosk-control`에 `MIRAEPASS_KIOSK_ALLOWED_ORIGINS=https://a.example,https://b.example`을 추가하세요.
+- 네트워크·화면·보안·전원 API는 관리자 PIN 확인 후 발급되는 토큰이 있어야 동작합니다. 토큰은 관리자 모드를 닫거나 30분 동안 쓰지 않으면 폐기됩니다.
+- PIN을 5번 연속 틀리면 30초 동안 잠깁니다.
+
+방화벽을 SSH에서 직접 확인/조작하려면:
+
+```bash
+sudo nft list table inet miraepass_kiosk
+sudo python3 /usr/local/bin/miraepass-kiosk-control.py firewall status   # on | off
+```
+

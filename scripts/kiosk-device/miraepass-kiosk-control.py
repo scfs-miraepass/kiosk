@@ -14,18 +14,23 @@ kiosk that boots without network would be stuck on Chromium's error page.
 
 from __future__ import annotations
 
+import hmac
 import ipaddress
 import json
 import os
 import platform
 import re
+import secrets
+import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from urllib.parse import urlsplit
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("MIRAEPASS_KIOSK_CONTROL_PORT", "8765"))
@@ -38,6 +43,16 @@ KIOSK_USER = os.environ.get("MIRAEPASS_KIOSK_USER", "")
 KIOSK_ENV_FILE = os.environ.get("MIRAEPASS_KIOSK_ENV_FILE", "/etc/default/miraepass-kiosk")
 ROTATE_BIN = os.environ.get("MIRAEPASS_KIOSK_ROTATE_BIN", "/usr/local/bin/miraepass-kiosk-rotate")
 X_DISPLAY = os.environ.get("MIRAEPASS_KIOSK_DISPLAY", ":0")
+# 관리자 토큰: PIN 확인 후 발급, 마지막 사용 후 이 시간이 지나면 만료
+ADMIN_TOKEN_TTL = 30 * 60
+# PIN을 연속으로 틀리면 잠시 잠근다
+PIN_MAX_FAILURES = 5
+PIN_LOCK_SECONDS = 30
+# 방화벽 (nftables 전용 테이블)
+FIREWALL_TABLE = "miraepass_kiosk"
+FIREWALL_FILE = os.environ.get("MIRAEPASS_KIOSK_FIREWALL_FILE", "/etc/miraepass/firewall.nft")
+FIREWALL_UNIT = "miraepass-firewall.service"
+FIREWALL_UNIT_FILE = f"/etc/systemd/system/{FIREWALL_UNIT}"
 # 방향을 바꾼 뒤 이 시간 안에 '유지'를 누르지 않으면 되돌린다 (터치 좌표가 틀어져도 복구되도록)
 ROTATION_CONFIRM_SECONDS = 15
 
@@ -49,10 +64,6 @@ def run(args: list[str], timeout: int = 20) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args, 124, f"시간 초과({timeout}초)")
     except FileNotFoundError:
         return subprocess.CompletedProcess(args, 127, f"{args[0]} 명령을 찾을 수 없어요")
-
-
-def shell(command: str, timeout: int = 20) -> subprocess.CompletedProcess[str]:
-    return run(["/bin/bash", "-lc", command], timeout=timeout)
 
 
 def split_terse(line: str) -> list[str]:
@@ -104,9 +115,12 @@ class Handler(BaseHTTPRequestHandler):
         print("[kiosk-control]", self.address_string(), fmt % args, flush=True)
 
     def end_headers(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self.headers.get("Origin")
+        if origin and origin_allowed(origin):
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Kiosk-Admin-Token")
         self.send_header("Access-Control-Allow-Private-Network", "true")
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
@@ -115,63 +129,41 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.end_headers()
 
+    def token(self) -> str:
+        return self.headers.get("X-Kiosk-Admin-Token", "")
+
     def do_GET(self) -> None:  # noqa: N802
-        try:
-            path = self.path.split("?", 1)[0]
-            if path in ("/", "/launch"):
-                return self.launch_page()
-            if path == "/health":
-                return self.ok({"ok": True, "hostname": socket.gethostname(), "model": device_model(), "version": VERSION, "powerControl": ALLOW_POWER})
-            if path == "/network/status":
-                return self.ok(network_status())
-            if path == "/wifi/scan":
-                return self.ok(scan_wifi())
-            if path == "/display/status":
-                return self.ok(display_status())
-            if path == "/ethernet/status":
-                return self.ok(ethernet_status())
-            self.fail("NOT_FOUND", "unknown endpoint", 404)
-        except PermissionError as exc:
-            self.fail("UNAUTHORIZED", str(exc), 401)
-        except Exception as exc:  # pragma: no cover - defensive for field devices
-            self.fail("INTERNAL", str(exc), 500)
+        self.dispatch("GET")
 
     def do_POST(self) -> None:  # noqa: N802
+        self.dispatch("POST")
+
+    def dispatch(self, method: str) -> None:
         try:
-            body = self.read_json()
             path = self.path.split("?", 1)[0]
-            if path == "/wifi/connect":
-                return self.ok(
-                    connect_wifi(
-                        ssid=str(body.get("ssid", "")),
-                        password=str(body.get("password", "")),
-                        security_mode=str(body.get("securityMode", "personal")),
-                        identity=str(body.get("identity", "")),
-                        hidden=bool(body.get("hidden", False)),
-                    )
-                )
-            if path == "/display/rotation":
-                return self.ok(set_rotation(str(body.get("rotation", ""))))
-            if path == "/display/confirm":
-                return self.ok(confirm_rotation())
-            if path == "/display/revert":
-                return self.ok(revert_rotation())
-            if path == "/ethernet/config":
-                return self.ok(configure_ethernet(body))
-            if path == "/admin/verify":
+            body = self.read_json() if method == "POST" else {}
+            # 인증 없이 쓸 수 있는 것: 시작 화면, 상태 확인, PIN 확인
+            if method == "GET" and path in ("/", "/launch"):
+                return self.launch_page()
+            if method == "GET" and path == "/health":
+                return self.ok({"ok": True, "hostname": socket.gethostname(), "model": device_model(), "version": VERSION, "powerControl": ALLOW_POWER})
+            if method == "POST" and path == "/admin/verify":
                 return self.ok(verify_admin(str(body.get("pin", ""))))
-            if path == "/terminal/run":
-                return self.ok(run_terminal(str(body.get("command", ""))))
-            if path == "/system/reboot":
-                return self.ok(power_action("reboot"))
-            if path == "/system/shutdown":
-                return self.ok(power_action("shutdown"))
-            self.fail("NOT_FOUND", "unknown endpoint", 404)
-        except PermissionError as exc:
+
+            route = ROUTES.get((method, path))
+            if route is None:
+                return self.fail("NOT_FOUND", "unknown endpoint", 404)
+            require_admin(self.token())
+            if path == "/admin/logout":
+                return self.ok(logout_admin(self.token()))
+            return self.ok(route(body))
+        except AuthError as exc:
             self.fail("UNAUTHORIZED", str(exc), 401)
+        except PermissionError as exc:
+            self.fail("FORBIDDEN", str(exc), 403)
         except ValueError as exc:
             self.fail("BAD_REQUEST", str(exc), 400)
-        except Exception as exc:  # pragma: no cover
+        except Exception as exc:  # pragma: no cover - defensive for field devices
             self.fail("INTERNAL", str(exc), 500)
 
     def read_json(self) -> dict[str, Any]:
@@ -649,18 +641,262 @@ def revert_rotation() -> dict[str, Any]:
 # ───────────────────────── 관리자 / 시스템 ─────────────────────────
 
 
+class AuthError(PermissionError):
+    """관리자 인증 실패 (401)."""
+
+
+_auth_lock = threading.Lock()
+_tokens: dict[str, float] = {}
+_pin_failures = {"count": 0, "until": 0.0}
+
+
+def _allowed_origins() -> set[str]:
+    extra = {o.strip().rstrip("/") for o in os.environ.get("MIRAEPASS_KIOSK_ALLOWED_ORIGINS", "").split(",") if o.strip()}
+    if KIOSK_URL:
+        parts = urlsplit(KIOSK_URL)
+        extra.add(f"{parts.scheme}://{parts.netloc}")
+    return extra
+
+
+ALLOWED_ORIGINS = _allowed_origins()
+
+
+def origin_allowed(origin: str) -> bool:
+    """클라우드 키오스크 주소와 이 기기(loopback)에서 연 페이지만 허용한다. 주소가 설정되지 않은 개발 환경은 모두 허용."""
+    if not KIOSK_URL:
+        return True
+    if origin.rstrip("/") in ALLOWED_ORIGINS:
+        return True
+    host = urlsplit(origin).hostname or ""
+    return host in ("127.0.0.1", "localhost", "::1")
+
+
 def verify_admin(pin: str) -> dict[str, Any]:
-    if pin != ADMIN_PIN:
-        raise PermissionError("관리자 PIN이 맞지 않아요")
+    with _auth_lock:
+        now = time.monotonic()
+        if now < _pin_failures["until"]:
+            raise AuthError(f"PIN을 여러 번 틀렸어요. {int(_pin_failures['until'] - now) + 1}초 뒤 다시 시도해 주세요")
+        if not hmac.compare_digest(pin.encode(), ADMIN_PIN.encode()):
+            _pin_failures["count"] += 1
+            if _pin_failures["count"] >= PIN_MAX_FAILURES:
+                _pin_failures.update(count=0, until=now + PIN_LOCK_SECONDS)
+            raise AuthError("관리자 PIN이 맞지 않아요")
+        _pin_failures.update(count=0, until=0.0)
+        token = secrets.token_urlsafe(24)
+        _tokens[token] = now + ADMIN_TOKEN_TTL
+        return {"ok": True, "token": token}
+
+
+def require_admin(token: str) -> None:
+    with _auth_lock:
+        now = time.monotonic()
+        for t, exp in list(_tokens.items()):
+            if exp < now:
+                del _tokens[t]
+        if not token or token not in _tokens:
+            raise AuthError("관리자 인증이 만료됐어요. 관리자 모드를 다시 열어 주세요")
+        _tokens[token] = now + ADMIN_TOKEN_TTL
+
+
+def logout_admin(token: str) -> dict[str, Any]:
+    with _auth_lock:
+        _tokens.pop(token, None)
     return {"ok": True}
 
 
-def run_terminal(command: str) -> dict[str, Any]:
-    command = command.strip()
-    if not command:
-        raise ValueError("command is required")
-    proc = shell(command, timeout=30)
-    return {"code": proc.returncode, "output": proc.stdout[-12000:]}
+# ───────────────────────── SSH ─────────────────────────
+
+
+def unit_exists(unit: str) -> bool:
+    proc = run(["systemctl", "list-unit-files", "--no-legend", "--no-pager", unit], timeout=10)
+    return proc.returncode == 0 and any(line.split()[0] == unit for line in proc.stdout.splitlines() if line.strip())
+
+
+def unit_state(unit: str) -> tuple[bool, bool]:
+    """(active, enabled)"""
+    active = run(["systemctl", "is-active", unit], timeout=10).stdout.strip() == "active"
+    enabled = run(["systemctl", "is-enabled", unit], timeout=10).stdout.strip() in ("enabled", "alias")
+    return active, enabled
+
+
+# Debian/Ubuntu/Raspberry Pi OS: ssh.service (Ubuntu 22.10+는 ssh.socket), Fedora/Arch: sshd.service
+SSH_SERVICES = ("ssh.service", "sshd.service")
+SSH_SOCKETS = ("ssh.socket", "sshd.socket")
+
+
+def ssh_ports() -> list[int]:
+    sshd = shutil.which("sshd") or ("/usr/sbin/sshd" if os.path.exists("/usr/sbin/sshd") else None)
+    ports: list[int] = []
+    if sshd:
+        proc = run([sshd, "-T"], timeout=10)
+        for line in proc.stdout.splitlines():
+            key, _, value = line.partition(" ")
+            if key == "port" and value.strip().isdigit():
+                ports.append(int(value.strip()))
+    return sorted(set(ports)) or [22]
+
+
+def ssh_status() -> dict[str, Any]:
+    units = [u for u in (*SSH_SERVICES, *SSH_SOCKETS) if unit_exists(u)]
+    on = False
+    for unit in units:
+        active, enabled = unit_state(unit)
+        on = on or active or enabled
+    return {"installed": bool(units), "enabled": on, "ports": ssh_ports() if units else []}
+
+
+def set_ssh(enabled: bool) -> dict[str, Any]:
+    services = [u for u in SSH_SERVICES if unit_exists(u)]
+    sockets = [u for u in SSH_SOCKETS if unit_exists(u)]
+    if not services and not sockets:
+        raise RuntimeError("SSH 서버(openssh-server)가 설치돼 있지 않아요")
+    if enabled:
+        if services:
+            # 소켓 활성화와 서비스가 같은 포트를 두고 다투지 않도록 서비스 방식으로 통일한다
+            for sock in sockets:
+                run(["systemctl", "disable", "--now", sock], timeout=20)
+            proc = run(["systemctl", "enable", "--now", services[0]], timeout=30)
+        else:
+            proc = run(["systemctl", "enable", "--now", sockets[0]], timeout=30)
+        if proc.returncode != 0:
+            raise RuntimeError(f"SSH를 켜지 못했어요: {proc.stdout.strip()[-300:]}")
+    else:
+        # 이미 접속 중인 세션은 끊지 않는다 (sshd KillMode=process)
+        for unit in (*sockets, *services):
+            run(["systemctl", "disable", "--now", unit], timeout=30)
+    refresh_firewall()
+    return {"ssh": ssh_status(), "firewall": firewall_status()}
+
+
+# ───────────────────────── 방화벽 ─────────────────────────
+
+
+def firewall_rules(ssh_ports_allowed: list[int]) -> str:
+    """들어오는 연결은 모두 막고, 나가는 연결의 응답과 꼭 필요한 것만 허용한다."""
+    ssh_rule = ""
+    if ssh_ports_allowed:
+        ports = ", ".join(str(p) for p in ssh_ports_allowed)
+        ssh_rule = f'        tcp dport {{ {ports} }} accept comment "ssh"\n'
+    return f"""#!/usr/sbin/nft -f
+# MIRAEPASS 키오스크 방화벽 — 관리자 모드/설치 스크립트가 자동 생성합니다. 직접 고치지 마세요.
+# 들어오는 연결 차단, 나가는 연결 허용. SSH가 켜져 있으면 SSH 포트만 허용.
+table inet {FIREWALL_TABLE}
+delete table inet {FIREWALL_TABLE}
+
+table inet {FIREWALL_TABLE} {{
+    chain input {{
+        type filter hook input priority 0; policy drop;
+
+        ct state established,related accept
+        ct state invalid drop
+        iif "lo" accept
+
+        # IPv6 동작에 필요한 ICMPv6(이웃 탐색·라우터 광고 등)과 DHCPv6 응답
+        meta l4proto ipv6-icmp icmpv6 type {{ destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert }} accept
+        ip6 saddr fe80::/10 udp dport 546 accept
+
+{ssh_rule}    }}
+}}
+"""
+
+
+def nft_bin() -> str:
+    path = shutil.which("nft") or ("/usr/sbin/nft" if os.path.exists("/usr/sbin/nft") else None)
+    if not path:
+        raise RuntimeError("nftables(nft)가 설치돼 있지 않아요. 설치 스크립트를 다시 실행해 주세요")
+    return path
+
+
+def other_firewalls() -> list[str]:
+    found = []
+    for unit, name in (("ufw.service", "ufw"), ("firewalld.service", "firewalld")):
+        if run(["systemctl", "is-active", unit], timeout=10).stdout.strip() == "active":
+            found.append(name)
+    return found
+
+
+def firewall_status() -> dict[str, Any]:
+    nft = shutil.which("nft") or ("/usr/sbin/nft" if os.path.exists("/usr/sbin/nft") else None)
+    active = bool(nft) and run([nft, "list", "table", "inet", FIREWALL_TABLE], timeout=10).returncode == 0
+    enabled = run(["systemctl", "is-enabled", FIREWALL_UNIT], timeout=10).stdout.strip() == "enabled"
+    ssh_allowed: list[int] = []
+    try:
+        with open(FIREWALL_FILE, encoding="utf-8") as f:
+            m = re.search(r"tcp dport \{ ([\d, ]+) \} accept", f.read())
+            if m:
+                ssh_allowed = [int(p) for p in m.group(1).replace(" ", "").split(",") if p]
+    except OSError:
+        pass
+    return {"available": bool(nft), "enabled": enabled or active, "active": active, "sshPorts": ssh_allowed if active else [], "others": other_firewalls()}
+
+
+def write_firewall() -> str:
+    ssh = ssh_status()
+    content = firewall_rules(ssh["ports"] if ssh["enabled"] else [])
+    nft = nft_bin()
+    os.makedirs(os.path.dirname(FIREWALL_FILE), exist_ok=True)
+    tmp = f"{FIREWALL_FILE}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(content)
+    check = run([nft, "-c", "-f", tmp], timeout=15)
+    if check.returncode != 0:
+        os.unlink(tmp)
+        raise RuntimeError(f"방화벽 규칙 검사에 실패했어요: {check.stdout.strip()[-300:]}")
+    os.replace(tmp, FIREWALL_FILE)
+    unit = f"""[Unit]
+Description=MIRAEPASS kiosk firewall (block inbound)
+After=nftables.service firewalld.service
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart={nft} -f {FIREWALL_FILE}
+ExecStop=-{nft} delete table inet {FIREWALL_TABLE}
+
+[Install]
+WantedBy=multi-user.target
+"""
+    try:
+        with open(FIREWALL_UNIT_FILE, encoding="utf-8") as f:
+            changed = f.read() != unit
+    except OSError:
+        changed = True
+    if changed:
+        with open(FIREWALL_UNIT_FILE, "w", encoding="utf-8") as f:
+            f.write(unit)
+        run(["systemctl", "daemon-reload"], timeout=20)
+    return nft
+
+
+def set_firewall(enabled: bool) -> dict[str, Any]:
+    if enabled:
+        write_firewall()
+        proc = run(["systemctl", "enable", FIREWALL_UNIT], timeout=20)
+        if proc.returncode == 0:
+            proc = run(["systemctl", "restart", FIREWALL_UNIT], timeout=20)
+        if proc.returncode != 0:
+            raise RuntimeError(f"방화벽을 켜지 못했어요: {proc.stdout.strip()[-300:]}")
+    else:
+        run(["systemctl", "disable", "--now", FIREWALL_UNIT], timeout=20)
+        nft = shutil.which("nft")
+        if nft:
+            run([nft, "delete", "table", "inet", FIREWALL_TABLE], timeout=10)
+    return {"ssh": ssh_status(), "firewall": firewall_status()}
+
+
+def refresh_firewall() -> None:
+    """SSH 상태가 바뀌면 방화벽이 켜져 있을 때만 규칙을 다시 만든다."""
+    if firewall_status()["enabled"]:
+        write_firewall()
+        proc = run(["systemctl", "restart", FIREWALL_UNIT], timeout=20)
+        if proc.returncode != 0:
+            raise RuntimeError(f"방화벽 규칙을 다시 적용하지 못했어요: {proc.stdout.strip()[-300:]}")
+
+
+def security_status() -> dict[str, Any]:
+    return {"ssh": ssh_status(), "firewall": firewall_status()}
 
 
 def power_action(action: str) -> dict[str, Any]:
@@ -675,10 +911,48 @@ def power_action(action: str) -> dict[str, Any]:
     return {"ok": True}
 
 
+# 관리자 토큰이 필요한 API
+ROUTES: dict[tuple[str, str], Any] = {
+    ("GET", "/network/status"): lambda b: network_status(),
+    ("GET", "/wifi/scan"): lambda b: scan_wifi(),
+    ("GET", "/ethernet/status"): lambda b: ethernet_status(),
+    ("GET", "/display/status"): lambda b: display_status(),
+    ("GET", "/security/status"): lambda b: security_status(),
+    ("POST", "/admin/logout"): lambda b: {"ok": True},
+    ("POST", "/wifi/connect"): lambda b: connect_wifi(
+        ssid=str(b.get("ssid", "")),
+        password=str(b.get("password", "")),
+        security_mode=str(b.get("securityMode", "personal")),
+        identity=str(b.get("identity", "")),
+        hidden=bool(b.get("hidden", False)),
+    ),
+    ("POST", "/ethernet/config"): configure_ethernet,
+    ("POST", "/display/rotation"): lambda b: set_rotation(str(b.get("rotation", ""))),
+    ("POST", "/display/confirm"): lambda b: confirm_rotation(),
+    ("POST", "/display/revert"): lambda b: revert_rotation(),
+    ("POST", "/security/firewall"): lambda b: set_firewall(bool(b.get("enabled"))),
+    ("POST", "/security/ssh"): lambda b: set_ssh(bool(b.get("enabled"))),
+    ("POST", "/system/reboot"): lambda b: power_action("reboot"),
+    ("POST", "/system/shutdown"): lambda b: power_action("shutdown"),
+}
+
+
+def cli(args: list[str]) -> int:
+    """설치 스크립트용: miraepass-kiosk-control.py firewall on|off|status"""
+    if len(args) == 2 and args[0] == "firewall" and args[1] in ("on", "off", "status"):
+        result = security_status() if args[1] == "status" else set_firewall(args[1] == "on")
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
+    print("usage: miraepass-kiosk-control.py firewall on|off|status", file=sys.stderr)
+    return 2
+
+
 def main() -> None:
+    if len(sys.argv) > 1:
+        sys.exit(cli(sys.argv[1:]))
     ThreadingHTTPServer.daemon_threads = True
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"MIRAEPASS Pi control API listening on http://{HOST}:{PORT}", flush=True)
+    print(f"MIRAEPASS kiosk control API listening on http://{HOST}:{PORT}", flush=True)
     httpd.serve_forever()
 
 

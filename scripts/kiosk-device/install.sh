@@ -17,6 +17,8 @@
 #   WIFI_COUNTRY    Wi‑Fi 국가 코드 (기본: KR)
 #   DISPLAY_ROTATE  화면 회전: normal | left | right | inverted (기본: normal). 터치 좌표도 같이 돌린다.
 #   HIDE_CURSOR     1이면 마우스 커서를 숨긴다 (기본: 1, 터치 전용 기기)
+#   FIREWALL        1이면 들어오는 연결을 모두 차단하는 방화벽을 켠다 (기본: 1, 재설치 시 이전 상태 유지).
+#                   SSH가 켜져 있으면 SSH 포트는 허용된다. 관리자 모드 › 보안에서 켜고 끌 수 있다.
 #   SKIP_PACKAGES   1이면 패키지 설치를 건너뛴다 (지원하지 않는 배포판용)
 #   NM_TAKEOVER     1이면 NetworkManager가 아닌 네트워크 관리자(dhcpcd·netplan·ifupdown 등)를
 #                   다음 부팅부터 NetworkManager로 바꾼다. 지금 연결된 SSH는 끊지 않는다.
@@ -80,6 +82,11 @@ WIFI_COUNTRY="${WIFI_COUNTRY:-KR}"
 # 관리자 모드에서 바꾼 화면 방향은 재설치해도 유지한다
 DISPLAY_ROTATE="${DISPLAY_ROTATE:-${PREV_ROTATE:-normal}}"
 HIDE_CURSOR="${HIDE_CURSOR:-1}"
+# 방화벽: 지정하지 않으면 이전 설치 상태(관리자 모드에서 바꾼 값)를 따르고, 처음이면 켠다
+if [[ -z "${FIREWALL:-}" && -e /etc/systemd/system/miraepass-firewall.service ]]; then
+  if systemctl is-enabled --quiet miraepass-firewall.service 2>/dev/null; then FIREWALL=1; else FIREWALL=0; fi
+fi
+FIREWALL="${FIREWALL:-1}"
 NM_TAKEOVER="${NM_TAKEOVER:-0}"
 
 CLOUD_URL="${CLOUD_URL:-${PREV_URL}}"
@@ -99,6 +106,7 @@ case "${DISPLAY_ROTATE}" in
   normal | left | right | inverted) ;;
   *) die "DISPLAY_ROTATE는 normal | left | right | inverted 중 하나여야 합니다." ;;
 esac
+[[ "${FIREWALL}" =~ ^[01]$ ]] || die "FIREWALL은 0 또는 1이어야 합니다."
 [[ "${WIFI_COUNTRY}" =~ ^[A-Z]{2}$ ]] || die "WIFI_COUNTRY는 대문자 두 글자 국가 코드여야 합니다 (예: KR)."
 
 id "${KIOSK_USER}" >/dev/null 2>&1 || die "사용자 ${KIOSK_USER}를 찾을 수 없습니다. KIOSK_USER=... 로 지정하세요."
@@ -144,7 +152,7 @@ echo "    기기: ${DEVICE_MODEL} · ${OS_NAME}"
 echo "    패키지 관리자: ${PKG} · 네트워크: ${NET_MANAGER}"
 echo "    사용자: ${KIOSK_USER} (${KIOSK_HOME})"
 echo "    키오스크 URL: ${CLOUD_URL}"
-echo "    Wi‑Fi 국가: ${WIFI_COUNTRY} · 화면 회전: ${DISPLAY_ROTATE} · 커서 숨김: ${HIDE_CURSOR}"
+echo "    Wi‑Fi 국가: ${WIFI_COUNTRY} · 화면 회전: ${DISPLAY_ROTATE} · 커서 숨김: ${HIDE_CURSOR} · 방화벽: ${FIREWALL}"
 
 # ───────────────────────── 패키지 ─────────────────────────
 
@@ -193,7 +201,7 @@ install_apt() {
   apt-get install -y --no-install-recommends \
     xserver-xorg ${xwrapper_pkg} xserver-xorg-input-libinput xinit openbox dbus-x11 \
     x11-xserver-utils xinput \
-    network-manager rfkill iw python3 ca-certificates fonts-noto-cjk \
+    network-manager rfkill iw nftables python3 ca-certificates fonts-noto-cjk \
     ${browser_pkg}
   local rc=$?
   set -e
@@ -203,7 +211,7 @@ install_apt() {
 
 install_dnf() {
   dnf install -y xorg-x11-server-Xorg xorg-x11-xinit xorg-x11-drv-libinput \
-    NetworkManager NetworkManager-wifi util-linux iw python3 ca-certificates
+    NetworkManager NetworkManager-wifi util-linux iw nftables python3 ca-certificates
   # 배포판/버전마다 이름이 다른 패키지는 하나씩 시도한다
   dnf install -y xrandr xset xinput || dnf install -y xorg-x11-server-utils xinput || warn "xrandr/xset/xinput 설치 실패"
   dnf install -y openbox dbus-x11 || warn "openbox 설치 실패 (창 관리자 없이 실행합니다)"
@@ -218,7 +226,7 @@ install_pacman() {
   find_browser >/dev/null || browser_pkg="chromium"
   pacman -Syu --needed --noconfirm \
     xorg-server xorg-xinit xf86-input-libinput xorg-xrandr xorg-xset xorg-xinput openbox \
-    networkmanager util-linux iw python ca-certificates noto-fonts-cjk \
+    networkmanager util-linux iw nftables python ca-certificates noto-fonts-cjk \
     ${browser_pkg}
 }
 
@@ -231,7 +239,7 @@ case "${PKG}" in
 esac
 
 # 필수 명령 확인 (SKIP_PACKAGES로 직접 설치한 경우 포함)
-for cmd in xinit Xorg nmcli python3; do
+for cmd in xinit Xorg nmcli nft python3; do
   command -v "${cmd}" >/dev/null 2>&1 || die "${cmd} 명령을 찾을 수 없습니다. 필요한 패키지를 설치해 주세요."
 done
 BROWSER_BIN="$(find_browser)" || die "Chromium 또는 Google Chrome을 찾을 수 없습니다."
@@ -542,6 +550,14 @@ systemctl set-default multi-user.target >/dev/null
 systemctl disable getty@tty1.service >/dev/null 2>&1 || true
 systemctl enable miraepass-kiosk-control.service miraepass-kiosk.service
 systemctl restart miraepass-kiosk-control.service
+
+echo "==> 방화벽 $([[ "${FIREWALL}" == "1" ]] && echo "켜기 (들어오는 연결 차단, SSH가 켜져 있으면 SSH만 허용)" || echo "끄기")"
+# 규칙 생성은 로컬 서비스와 같은 코드를 쓴다. 이미 연결된 SSH 세션은 established 규칙으로 유지된다.
+if [[ "${FIREWALL}" == "1" ]]; then
+  "${PYTHON_BIN}" /usr/local/bin/miraepass-kiosk-control.py firewall on >/dev/null || warn "방화벽을 켜지 못했습니다"
+else
+  "${PYTHON_BIN}" /usr/local/bin/miraepass-kiosk-control.py firewall off >/dev/null || true
+fi
 
 sleep 1
 if systemctl is-active --quiet miraepass-kiosk-control.service; then

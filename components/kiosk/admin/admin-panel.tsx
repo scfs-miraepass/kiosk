@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, ArrowLeft, Cable, KeyRound, Loader2, Monitor, Power, RefreshCw, Settings, Wifi } from "lucide-react";
+import { Activity, ArrowLeft, Cable, KeyRound, Loader2, Monitor, Power, RefreshCw, Settings, ShieldCheck, Wifi } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useIdleTimer } from "@/hooks/use-idle-timer";
@@ -8,8 +8,9 @@ import { cn } from "@/lib/utils";
 import { AdminKeyboardProvider, Notice, StatusDot } from "./admin-ui";
 import { PowerSection, TokenSection } from "./device-sections";
 import { DisplaySection } from "./display-section";
-import { errorMessage, type Health, localApi, type NetworkStatus } from "./local-api";
+import { errorMessage, type Health, localApi, type NetworkStatus, setAdminToken } from "./local-api";
 import { type AdminSection, EthernetSection, StatusSection, WifiSection } from "./network-sections";
+import { SecuritySection } from "./security-section";
 
 /** 관리자 모드를 열어 두고 이 시간 동안 아무 입력이 없으면 키오스크로 돌아간다 */
 const ADMIN_IDLE_SECONDS = 180;
@@ -21,6 +22,7 @@ const NAV: { id: AdminSection; label: string; icon: React.ReactNode }[] = [
   { id: "ethernet", label: "유선 LAN", icon: <Cable className="size-6" /> },
   { id: "wifi", label: "Wi‑Fi", icon: <Wifi className="size-6" /> },
   { id: "display", label: "화면", icon: <Monitor className="size-6" /> },
+  { id: "security", label: "보안", icon: <ShieldCheck className="size-6" /> },
   { id: "token", label: "기기 토큰", icon: <KeyRound className="size-6" /> },
   { id: "power", label: "전원", icon: <Power className="size-6" /> },
 ];
@@ -45,7 +47,14 @@ export function KioskAdminPanel({ onClose, onTokenRegistered }: Props) {
   const [networkError, setNetworkError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  useIdleTimer(ADMIN_IDLE_SECONDS, onClose);
+  // 닫을 때 로컬 서비스의 관리자 토큰을 폐기한다 (버튼·무입력 자동 종료 공통)
+  const close = useCallback(() => {
+    void localApi("/admin/logout", { method: "POST", body: "{}", timeoutMs: 3000 }).catch(() => {});
+    setAdminToken(null);
+    onClose();
+  }, [onClose]);
+
+  useIdleTimer(ADMIN_IDLE_SECONDS, close);
 
   const checkHealth = useCallback(async () => {
     setHealthChecking(true);
@@ -122,7 +131,7 @@ export function KioskAdminPanel({ onClose, onTokenRegistered }: Props) {
         </div>
         <button
           type="button"
-          onClick={onClose}
+          onClick={close}
           className="flex h-12 shrink-0 items-center gap-2 rounded-2xl bg-slate-900 px-5 text-base font-bold text-white active:bg-slate-700"
         >
           <ArrowLeft className="size-5" /> 키오스크로 돌아가기
@@ -177,6 +186,7 @@ export function KioskAdminPanel({ onClose, onTokenRegistered }: Props) {
                 {section === "ethernet" && <EthernetSection {...netProps} />}
                 {section === "wifi" && <WifiSection {...netProps} />}
                 {section === "display" && <DisplaySection disabled={!connected} />}
+                {section === "security" && <SecuritySection disabled={!connected} />}
                 {section === "token" && <TokenSection onTokenRegistered={onTokenRegistered} />}
                 {section === "power" && <PowerSection health={health} />}
               </div>

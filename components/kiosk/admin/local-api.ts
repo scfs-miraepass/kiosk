@@ -13,6 +13,15 @@ export class LocalApiError extends Error {
   }
 }
 
+/**
+ * PIN 확인 후 로컬 서비스가 발급한 관리자 토큰. 설정 API는 이 토큰이 있어야 동작한다.
+ * 메모리에만 두므로 새로고침하면 사라지고, 관리자 모드를 닫을 때 지운다.
+ */
+let adminToken: string | null = null;
+export const setAdminToken = (token: string | null) => {
+  adminToken = token;
+};
+
 export async function localApi<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const { timeoutMs = 15_000, ...rest } = init ?? {};
   const controller = new AbortController();
@@ -23,7 +32,11 @@ export async function localApi<T>(path: string, init?: RequestInit & { timeoutMs
       ...rest,
       cache: "no-store",
       signal: controller.signal,
-      headers: rest.body ? { "Content-Type": "application/json", ...rest.headers } : rest.headers,
+      headers: {
+        ...(rest.body ? { "Content-Type": "application/json" } : {}),
+        ...(adminToken ? { "X-Kiosk-Admin-Token": adminToken } : {}),
+        ...rest.headers,
+      },
     });
   } catch {
     throw new LocalApiError(
@@ -94,4 +107,9 @@ export type DisplayStatus = {
   /** 바꾼 뒤 '유지' 확인을 기다리는 중이면, 남은 시간이 지나면 previous로 되돌아간다 */
   pending: { rotation: Rotation; previous: Rotation; secondsLeft: number } | null;
   available: boolean;
+};
+
+export type SecurityStatus = {
+  ssh: { installed: boolean; enabled: boolean; ports: number[] };
+  firewall: { available: boolean; enabled: boolean; active: boolean; sshPorts: number[]; others: string[] };
 };

@@ -3,7 +3,7 @@
 import { LockKeyhole, X } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { KIOSK_CONTROL_URL } from "./admin/local-api";
+import { errorMessage, localApi, setAdminToken } from "./admin/local-api";
 import { NumericKeypad } from "./numeric-keypad";
 
 export function KioskAdminUnlock({ onUnlocked, onCancel }: { onUnlocked: () => void; onCancel: () => void }) {
@@ -16,24 +16,12 @@ export function KioskAdminUnlock({ onUnlocked, onCancel }: { onUnlocked: () => v
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${KIOSK_CONTROL_URL}/admin/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin: nextPin }),
-        signal: AbortSignal.timeout(8000),
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.success) throw new Error(json?.message ?? "PIN을 확인할 수 없어요");
+      const res = await localApi<{ token: string }>("/admin/verify", { method: "POST", body: JSON.stringify({ pin: nextPin }), timeoutMs: 8000 });
+      setAdminToken(res.token);
       onUnlocked();
     } catch (e) {
       setPin("");
-      setError(
-        e instanceof TypeError || (e instanceof DOMException && e.name === "TimeoutError")
-          ? "키오스크 로컬 서비스에 연결할 수 없어요"
-          : e instanceof Error
-            ? e.message
-            : "PIN 확인에 실패했어요",
-      );
+      setError(errorMessage(e, "PIN 확인에 실패했어요"));
     } finally {
       setLoading(false);
     }
