@@ -1,11 +1,16 @@
 "use client";
 
 import { MonitorSmartphone, TriangleAlert } from "lucide-react";
+import type React from "react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useIdleTimer } from "@/hooks/use-idle-timer";
 import { api, ClientApiError } from "@/lib/fetcher";
+import { PiControlPanel, type PiControlFocusTarget } from "./pi-control-panel";
+import { TouchKeyboard } from "./touch-keyboard";
+
+type FocusTarget = "token" | PiControlFocusTarget;
 
 /**
  * 키오스크 기기 등록 / 토큰 변경: 관리자 설정 화면의 기기 토큰을 입력.
@@ -27,13 +32,14 @@ export function KioskSetup({
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [focusTarget, setFocusTarget] = useState<FocusTarget>("token");
   const changing = !!onCancel;
 
   // 토큰 변경 화면을 열어 둔 채 자리를 비우면 1분 뒤 주문 화면으로 돌아간다
   useIdleTimer(60, () => onCancel?.(), changing && !loading);
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     const token = value.trim();
     setLoading(true);
     setError(null);
@@ -53,15 +59,33 @@ export function KioskSetup({
     }
   };
 
+  const keyboardEvent = (detail: { target: PiControlFocusTarget; value?: string; backspace?: boolean }) => {
+    window.dispatchEvent(new CustomEvent("mp-cafe:kiosk-keyboard", { detail }));
+  };
+
+  const inputText = (text: string) => {
+    if (focusTarget === "token") setValue((prev) => `${prev}${text}`);
+    else keyboardEvent({ target: focusTarget, value: text });
+  };
+
+  const backspace = () => {
+    if (focusTarget === "token") setValue((prev) => prev.slice(0, -1));
+    else keyboardEvent({ target: focusTarget, backspace: true });
+  };
+
   return (
-    <div className="flex h-dvh items-center justify-center p-6">
-      <form onSubmit={submit} className="w-full max-w-md space-y-6 rounded-3xl bg-white p-8 shadow-sm">
+    <div className="grid h-dvh grid-rows-[1fr_auto] gap-4 overflow-hidden p-5">
+      <div className="grid min-h-0 grid-cols-[minmax(360px,0.9fr)_minmax(480px,1.1fr)] gap-4 overflow-auto">
+        <form onSubmit={submit} className="space-y-6 rounded-3xl bg-white p-8 shadow-sm">
         <div className="flex flex-col items-center gap-3 text-center">
           <MonitorSmartphone className="size-12 text-primary" />
           <h1 className="text-2xl font-bold">{changing ? "기기 토큰 변경" : "키오스크 기기 등록"}</h1>
           <p className="text-muted-foreground">
             관리자 › 설정 화면의 키오스크 기기 토큰을 입력해 주세요.
             {changing && <> 새 토큰이 확인돼야 바뀌고, 취소하면 지금 토큰을 그대로 써요.</>}
+          </p>
+          <p className="rounded-2xl bg-blue-50 p-3 text-sm text-blue-900">
+            키보드·마우스 없이도 아래 터치 키보드로 토큰, Wi‑Fi, 터미널 명령을 입력할 수 있어요.
           </p>
         </div>
         {reason === "invalid" && (
@@ -73,6 +97,7 @@ export function KioskSetup({
         <Input
           value={value}
           onChange={(e) => setValue(e.target.value)}
+          onFocus={() => setFocusTarget("token")}
           placeholder={changing ? "새 기기 토큰" : "기기 토큰"}
           className="h-14 text-lg"
           autoComplete="off"
@@ -92,6 +117,9 @@ export function KioskSetup({
           </Button>
         </div>
       </form>
+        <PiControlPanel onFocusTarget={setFocusTarget} />
+      </div>
+      <TouchKeyboard onInput={inputText} onBackspace={backspace} onEnter={focusTarget === "token" ? () => void submit() : undefined} disabled={loading} />
     </div>
   );
 }
