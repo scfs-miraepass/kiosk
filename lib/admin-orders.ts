@@ -1,13 +1,14 @@
 import { and, desc, eq, gte, like, lt, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "./db";
+import { ORDER_STATUSES, PAYMENT_STATUSES } from "./db/schema";
 import { loadOrders } from "./orders";
 
 export const OrdersQuery = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  status: z.enum(["pending_payment", "failed", "received", "preparing", "ready", "completed", "cancelled"]).optional(),
-  payment: z.enum(["unpaid", "paid", "failed", "refunded", "refund_failed"]).optional(),
+  status: z.enum(ORDER_STATUSES).optional(),
+  payment: z.enum(PAYMENT_STATUSES).optional(),
   customerType: z.enum(["student", "teacher"]).optional(),
   q: z.string().trim().max(30).optional(),
   page: z.coerce.number().int().min(1).default(1),

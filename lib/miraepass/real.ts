@@ -10,11 +10,25 @@ function baseUrl() {
   return url.endsWith("/") ? url : `${url}/`;
 }
 
-/** 요청마다 Cookie 헤더를 주입한 SDK 인스턴스 생성 (서버 전용) */
+/**
+ * MIRAEPASS 요청 하나의 제한 시간. 지정하지 않으면 undici 기본값(약 5분)까지 응답을 기다려
+ * 키오스크 결제가 그동안 멈춘다.
+ */
+function requestTimeout() {
+  const ms = Number(process.env.MIRAEPASS_TIMEOUT_MS);
+  return Number.isFinite(ms) && ms > 0 ? ms : 8_000;
+}
+
+/** 요청마다 Cookie 헤더를 주입한 SDK 인스턴스 생성 (서버 전용). 인스턴스 하나로 요청 하나만 보낸다 */
 function sdk(cookie?: string) {
   const client = createClient({
     baseUrl: baseUrl(),
     headers: cookie ? { Cookie: cookie } : undefined,
+    // SDK의 timeout 옵션은 동작하지 않는다: 생성된 클라이언트가 항상 Request의 signal을 ofetch에 넘기는데,
+    // ofetch는 signal이 있으면 timeout을 무시한다. 그래서 제한 시간이 걸린 signal을 직접 넘긴다
+    signal: AbortSignal.timeout(requestTimeout()),
+    // 포인트 차감·지급은 멱등이 아니므로 자동 재시도하지 않는다
+    retry: 0,
   });
   return new MiraepassApi({ client, key: `kiosk-${Math.random()}` });
 }
@@ -34,8 +48,12 @@ function messageOf(error: unknown): string {
   return "MIRAEPASS 요청에 실패했어요";
 }
 
+type StatusMap = Partial<Record<number, MiraepassError["code"]>>;
+/** uncertain: 상태를 바꾸는 요청(차감 등). 응답을 받지 못하면 처리 여부를 알 수 없다고 표시한다 */
+type CallOptions = { uncertain?: boolean };
+
 /** SDK 결과를 검사해서 실패면 MiraepassError로 변환 */
-function unwrap<T>(result: SdkResult, map: Partial<Record<number, MiraepassError["code"]>> = {}): T {
+function unwrap<T>(result: SdkResult, map: StatusMap = {}, opts: CallOptions = {}): T {
   if (!result.error && result.data !== undefined) {
     const body = result.data as { data?: T };
     return (body && typeof body === "object" && "data" in body ? body.data : body) as T;
@@ -45,15 +63,17 @@ function unwrap<T>(result: SdkResult, map: Partial<Record<number, MiraepassError
   const code: MiraepassError["code"] =
     (status ? map[status] : undefined) ??
     (status === 401 ? "UNAUTHORIZED" : status === 403 ? "FORBIDDEN" : status === 404 ? "USER_NOT_FOUND" : status === 429 ? "LIMIT_EXCEEDED" : "UNAVAILABLE");
-  throw new MiraepassError(code, messageOf(result.error), status);
+  // SDK는 네트워크 오류·타임아웃도 예외 대신 { error, response: undefined }로 돌려준다
+  const uncertain = !!opts.uncertain && code === "UNAVAILABLE" && (status === undefined || status >= 500);
+  throw new MiraepassError(code, messageOf(result.error), status, uncertain);
 }
 
-async function call(fn: () => Promise<SdkResult>): Promise<SdkResult> {
+async function call(fn: () => Promise<SdkResult>, opts: CallOptions = {}): Promise<SdkResult> {
   try {
     return await fn();
   } catch (e) {
     if (e instanceof MiraepassError) throw e;
-    throw new MiraepassError("UNAVAILABLE", `MIRAEPASS 서버에 연결할 수 없어요 (${(e as Error).message})`);
+    throw new MiraepassError("UNAVAILABLE", `MIRAEPASS 서버에 연결할 수 없어요 (${(e as Error).message})`, undefined, !!opts.uncertain);
   }
 }
 
@@ -90,14 +110,17 @@ class ServiceSession {
   }
 
   /** 401이면 한 번 재로그인 후 재시도한 원본 결과 */
-  async runRaw(fn: (api: MiraepassApi) => Promise<SdkResult>): Promise<SdkResult> {
-    const res = await call(async () => fn(sdk(await this.get())));
+  async runRaw(fn: (api: MiraepassApi) => Promise<SdkResult>, opts: CallOptions = {}): Promise<SdkResult> {
+    // 서비스 계정 로그인 실패는 본 요청을 보내기 전이므로 확실한 실패다. 본 요청만 opts를 적용한다
+    const cookie = await this.get();
+    const res = await call(() => fn(sdk(cookie)), opts);
     if (res.response?.status !== 401) return res;
-    return call(async () => fn(sdk(await this.get(true))));
+    const fresh = await this.get(true);
+    return call(() => fn(sdk(fresh)), opts);
   }
 
-  async run<T>(fn: (api: MiraepassApi) => Promise<SdkResult>, map?: Parameters<typeof unwrap>[1]): Promise<T> {
-    return unwrap<T>(await this.runRaw(fn), map);
+  async run<T>(fn: (api: MiraepassApi) => Promise<SdkResult>, map?: StatusMap, opts?: CallOptions): Promise<T> {
+    return unwrap<T>(await this.runRaw(fn, opts), map, opts);
   }
 }
 
@@ -143,6 +166,7 @@ export const realGateway: MiraepassGateway = {
           body: { target_user_id: userId, amount, memo, change_type: PointHistoryType.CAFE },
         }),
       { 400: "INSUFFICIENT_POINT", 404: "USER_NOT_FOUND" },
+      { uncertain: true },
     );
     return typeof balance === "number" ? balance : null;
   },
@@ -154,6 +178,7 @@ export const realGateway: MiraepassGateway = {
           body: { target_user_id: userId, amount, memo, change_type: PointHistoryType.CAFE },
         }),
       { 404: "USER_NOT_FOUND", 429: "LIMIT_EXCEEDED" },
+      { uncertain: true },
     );
   },
 

@@ -24,6 +24,11 @@ export class MiraepassError extends Error {
     public code: MPErrorCode,
     message: string,
     public status?: number,
+    /**
+     * 요청이 MIRAEPASS에서 처리됐는지 알 수 없음 (응답 없음·타임아웃·5xx).
+     * 포인트 차감에서 true면 실제로 빠졌을 수 있으므로 '실패'로 단정하면 안 된다.
+     */
+    public uncertain = false,
   ) {
     super(message);
     this.name = "MiraepassError";

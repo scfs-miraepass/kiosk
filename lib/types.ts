@@ -11,7 +11,11 @@ export type OrderStatus =
   | "completed"
   | "cancelled";
 
-export type PaymentStatus = "unpaid" | "paid" | "failed" | "refunded" | "refund_failed";
+/**
+ * unknown: 차감 요청의 응답을 받지 못해(타임아웃·네트워크 오류·5xx) 실제로 빠졌는지 알 수 없음. 관리자가 확인 후 확정한다
+ * refunding: 환불 요청 진행 중 (중복 환불 방지용 선점 상태)
+ */
+export type PaymentStatus = "unpaid" | "paid" | "failed" | "unknown" | "refunded" | "refunding" | "refund_failed";
 
 export type MenuOptionItemDTO = {
   id: number;
@@ -169,6 +173,8 @@ export type ApiErrorCode =
   | "INVALID_OPTIONS"
   | "PRICE_CHANGED"
   | "PAYMENT_UNAVAILABLE"
+  /** 차감 결과를 알 수 없음. 다시 결제하면 이중 차감될 수 있으므로 키오스크는 재시도하지 않는다 */
+  | "PAYMENT_UNKNOWN"
   | "INVALID_TRANSITION"
   | "REFUND_FAILED"
   | "UNAUTHORIZED"
@@ -212,6 +218,8 @@ export type StatsResponse = {
     avgTicket: number;
     cancelled: number;
     refundFailed: number;
+    /** 차감 결과를 확인해야 하는 주문 (기간 무관) */
+    paymentUnknown: number;
   };
   daily: { date: string; revenue: number; orders: number }[];
   hourly: { hour: number; orders: number }[];
