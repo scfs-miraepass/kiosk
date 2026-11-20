@@ -13,7 +13,6 @@ import {
   localApi,
   type NetworkStatus,
   APP_VERSION,
-  baseVersion,
   signalLevel,
   versionLabel,
   WEAK_SIGNAL,
@@ -54,8 +53,6 @@ function RefreshButton({ onClick, loading, disabled }: { onClick: () => void; lo
 
 export function StatusSection({ network, networkLoading, refreshNetwork, disabled, health, onNavigate }: NetworkProps & { health: Health | null; onNavigate: (s: AdminSection) => void }) {
   const conn = network ? (CONNECTIVITY[network.connectivity] ?? { label: "확인 불가", tone: "off" as const }) : null;
-  const deviceVersion = baseVersion(health?.version);
-  const scriptOutdated = Boolean(APP_VERSION && deviceVersion && deviceVersion !== APP_VERSION);
 
   return (
     <>
@@ -91,18 +88,13 @@ export function StatusSection({ network, networkLoading, refreshNetwork, disable
             onClick={() => onNavigate("wifi")}
           />
         </div>
-        {scriptOutdated && (
-          <Notice tone="warning" className="text-sm">
-            기기 스크립트(v{baseVersion(health?.version)})가 키오스크 앱(v{APP_VERSION})과 버전이 달라요. 새 기능이 동작하지 않으면 기기 스크립트를 삭제 후 다시 설치해 주세요.
-          </Notice>
-        )}
         <Card title="기기 정보">
           <InfoGrid
             rows={[
               ["기기 모델", health?.model],
               ["호스트 이름", network?.hostname ?? health?.hostname],
-              ["키오스크 앱", APP_VERSION ? `v${APP_VERSION}` : "알 수 없음"],
-              ["기기 스크립트", health ? versionLabel(health.version) : "로컬 서비스 연결 안 됨"],
+              ["클라이언트", APP_VERSION ? `v${APP_VERSION}` : "알 수 없음"],
+              ["펌웨어", health ? versionLabel(health.version) : "로컬 서비스 연결 안 됨"],
               ["전원 제어", health ? (health.powerControl ? "사용 가능" : "사용 불가") : "-"],
               ["키오스크 주소", typeof window === "undefined" ? "" : window.location.origin],
             ]}

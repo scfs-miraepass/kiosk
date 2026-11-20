@@ -148,7 +148,7 @@ export type UpdateState = "checking" | "downloading" | "installing" | "done" | "
 export const UPDATE_TERMINAL_STATES: readonly UpdateState[] = ["done", "uptodate", "failed"];
 
 export type UpdateStatus = {
-  /** 기기 스크립트 버전 */
+  /** 펌웨어(기기 스크립트) 버전 */
   version: string;
   /** 업데이트를 받는 GitHub 저장소 (owner/repo) */
   repo: string;
@@ -173,7 +173,7 @@ export type UpdateStatus = {
 
 export type UpdateCheck = { current: string; latest: string; updateAvailable: boolean; repo: string };
 
-/** 키오스크 앱 버전 (빌드할 때 package.json에서 넣음, next.config.ts) */
+/** 클라이언트(이 웹 앱) 버전. 빌드할 때 package.json에서 넣음 (next.config.ts). 펌웨어 버전과는 따로 올라간다. */
 export const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "";
 
 /** "1.1.1+a1b2c3d.dirty" → "1.1.1". 알 수 없으면 "" */
@@ -182,10 +182,10 @@ export function baseVersion(version?: string) {
   return version.split("+")[0];
 }
 
-/** 기기 스크립트 버전 표시: v1.1.1 (커밋 a1b2c3d, 수정됨) */
+/** 펌웨어(기기 스크립트) 버전 표시: v1.1.1 (커밋 a1b2c3d, 수정본) */
 export function versionLabel(version?: string) {
   const base = baseVersion(version);
-  if (!base) return "알 수 없음 (저장소 밖에서 설치됨)";
+  if (!base) return "알 수 없음";
   const build = version!.split("+")[1];
   if (!build) return `v${base}`;
   const [commit, dirty] = build.split(".");

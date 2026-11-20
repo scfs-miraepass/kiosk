@@ -1,7 +1,7 @@
 // manual_version으로 실행한 릴리스를 semantic-release가 만든 것과 같은 형태로 남깁니다.
 // 버전 파일과 CHANGELOG.md를 커밋하고 태그와 git note를 푸시해, 다음 semantic-release가 이 버전을 이어받게 합니다.
 import { execFileSync } from "node:child_process";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import semver from "semver";
 
 const version = process.env.MANUAL_VERSION;
@@ -44,10 +44,8 @@ if (lastVersion && !semver.gt(version, lastVersion)) {
 }
 
 execFileSync("npm", ["pkg", "set", `"version=${version}"`], { stdio: "inherit" });
-// 키오스크 기기 스크립트 폴더만 복사해 설치해도 버전을 알 수 있도록 같은 버전을 적어 둔다
-writeFileSync("scripts/kiosk-device/VERSION", `${version}\n`);
 
-git("add", "package.json", "scripts/kiosk-device/VERSION");
+git("add", "package.json");
 git("commit", "-m", `chore(release): ${version} [skip ci]`);
 git("tag", tag);
 

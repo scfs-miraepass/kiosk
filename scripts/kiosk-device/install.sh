@@ -26,7 +26,7 @@
 #                   SSH가 켜져 있으면 SSH 포트는 허용된다. 관리자 모드 › 보안에서 켜고 끌 수 있다.
 #   AUTO_UPDATE     1이면 매일 새벽 자동 업데이트 (기본: 1). 관리자 모드 › 업데이트에서 켜고 끌 수 있다.
 #   CHROMIUM_EXTRA_FLAGS  Chromium 추가 플래그 (기본: 라즈베리파이는 GPU 래스터화 플래그, 그 외 없음)
-#   KIOSK_VERSION   관리자 모드에 표시할 버전 (기본: 저장소 package.json 버전 + git 커밋, 없으면 이 폴더의 VERSION 파일)
+#   KIOSK_VERSION   관리자 모드에 표시할 펌웨어 버전 (기본: 이 폴더의 VERSION 파일 + 저장소 git 커밋). 보통 지정하지 않는다.
 #   UPDATE_REPO     업데이트를 받을 GitHub 저장소 owner/repo (기본: 저장소 git remote, 없으면 scfs-miraepass/kiosk)
 #   SKIP_PACKAGES   1이면 패키지 설치를 건너뛴다 (지원하지 않는 배포판용)
 #   NM_TAKEOVER     1이면 NetworkManager가 아닌 네트워크 관리자(dhcpcd·netplan·ifupdown 등)를
@@ -432,24 +432,26 @@ SCREEN_BEFORE="$(screen_digest)"
 
 fi
 
-# 설치하는 키오스크 버전 (관리자 모드에 표시)
-#   KIOSK_VERSION → 저장소 package.json 버전 + git 커밋 → 이 폴더의 VERSION 파일 (릴리스할 때 자동으로 맞춰짐)
+# 설치하는 펌웨어 버전 (관리자 모드에 표시). 펌웨어는 클라이언트(웹 앱)와 따로 버전을 올린다.
+#   KIOSK_VERSION → 이 폴더의 VERSION 파일 (펌웨어 파일이 바뀌어 릴리스될 때 자동으로 올라감)
+#   저장소에서 설치하면 git 커밋을 덧붙인다 (예: 1.4.0+a1b2c3d, 커밋하지 않은 수정이 있으면 .dirty)
 REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-if [[ -z "${KIOSK_VERSION:-}" && -f "${REPO_DIR}/package.json" ]]; then
-  # 다른 프로젝트의 package.json을 읽지 않도록 이름을 확인한다
-  KIOSK_VERSION="$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); print(p["version"] if p.get("name")=="miraepass-kiosk" else "")' "${REPO_DIR}/package.json" 2>/dev/null || true)"
-  if [[ -n "${KIOSK_VERSION}" ]] && command -v git >/dev/null 2>&1; then
-    # sudo(root)로 사용자 소유 저장소를 읽으므로 safe.directory를 지정한다
-    COMMIT="$(git -c safe.directory='*' -C "${REPO_DIR}" rev-parse --short HEAD 2>/dev/null || true)"
+VERSION_LEGACY=0
+if [[ -n "${KIOSK_VERSION:-}" ]]; then
+  # 펌웨어 버전이 따로 생기기 전의 기기 업데이트는 클라이언트 릴리스 태그를 받아 KIOSK_VERSION에 클라이언트 버전을 넘긴다.
+  # 그 값은 펌웨어 버전과 비교할 수 없으므로 표시해 두고, 다음 업데이트 때 최신 펌웨어를 받게 한다.
+  [[ "${MODE}" == "update" ]] && VERSION_LEGACY=1
+elif [[ -f "${SCRIPT_DIR}/VERSION" ]]; then
+  KIOSK_VERSION="$(tr -d '[:space:]' <"${SCRIPT_DIR}/VERSION")"
+  # 이 저장소의 scripts/kiosk-device일 때만 커밋을 붙인다. sudo(root)로 사용자 소유 저장소를 읽으므로 safe.directory를 지정한다.
+  if [[ -n "${KIOSK_VERSION}" ]] && command -v git >/dev/null 2>&1 &&
+    [[ "$(git -c safe.directory='*' -C "${SCRIPT_DIR}" rev-parse --show-prefix 2>/dev/null || true)" == "scripts/kiosk-device/" ]]; then
+    COMMIT="$(git -c safe.directory='*' -C "${SCRIPT_DIR}" rev-parse --short HEAD 2>/dev/null || true)"
     if [[ -n "${COMMIT}" ]]; then
-      DIRTY="$(git -c safe.directory='*' -C "${REPO_DIR}" status --porcelain -- scripts/kiosk-device 2>/dev/null | head -n1 || true)"
+      DIRTY="$(git -c safe.directory='*' -C "${SCRIPT_DIR}" status --porcelain -- . 2>/dev/null | head -n1 || true)"
       KIOSK_VERSION="${KIOSK_VERSION}+${COMMIT}${DIRTY:+.dirty}"
     fi
   fi
-fi
-# scripts/kiosk-device 폴더만 복사했거나 저장소 압축 파일로 받은 경우
-if [[ -z "${KIOSK_VERSION:-}" && -f "${SCRIPT_DIR}/VERSION" ]]; then
-  KIOSK_VERSION="$(tr -d '[:space:]' <"${SCRIPT_DIR}/VERSION")"
 fi
 [[ -z "${KIOSK_VERSION:-}" || "${KIOSK_VERSION}" =~ ^[0-9A-Za-z.+-]+$ ]] || die "버전 형식이 올바르지 않습니다: ${KIOSK_VERSION}"
 KIOSK_VERSION="${KIOSK_VERSION:-unknown}"
@@ -505,13 +507,14 @@ install -m 0755 "${SCRIPT_DIR}/uninstall.sh" /usr/local/sbin/miraepass-kiosk-uni
 mkdir -p /etc/default
 # 사용자가 직접 추가한 줄(예: MIRAEPASS_KIOSK_ALLOWED_ORIGINS)은 업데이트해도 남긴다
 keep_extra() { grep -v -E "^($2)=" "$1" 2>/dev/null | grep -v -E '^\s*(#|$)' || true; }
-EXTRA_CONTROL_ENV="$(keep_extra /etc/default/miraepass-kiosk-control 'MIRAEPASS_KIOSK_(ADMIN_PIN|ALLOW_POWER|URL|VERSION|UPDATE_REPO|USER|ENV_FILE|ROTATE_BIN)')"
+EXTRA_CONTROL_ENV="$(keep_extra /etc/default/miraepass-kiosk-control 'MIRAEPASS_KIOSK_(ADMIN_PIN|ALLOW_POWER|URL|VERSION|VERSION_LEGACY|UPDATE_REPO|USER|ENV_FILE|ROTATE_BIN)')"
 EXTRA_KIOSK_ENV="$(keep_extra /etc/default/miraepass-kiosk 'KIOSK_URL|DISPLAY_ROTATE|DISPLAY_SCALE|CHROMIUM_EXTRA_FLAGS')"
 cat >/etc/default/miraepass-kiosk-control <<DEFAULT
 MIRAEPASS_KIOSK_ADMIN_PIN=${ADMIN_PIN}
 MIRAEPASS_KIOSK_ALLOW_POWER=1
 MIRAEPASS_KIOSK_URL=${CLOUD_URL}
 MIRAEPASS_KIOSK_VERSION=${KIOSK_VERSION}
+MIRAEPASS_KIOSK_VERSION_LEGACY=${VERSION_LEGACY}
 MIRAEPASS_KIOSK_UPDATE_REPO=${UPDATE_REPO}
 MIRAEPASS_KIOSK_USER=${KIOSK_USER}
 MIRAEPASS_KIOSK_ENV_FILE=/etc/default/miraepass-kiosk
@@ -798,14 +801,14 @@ fi
 
 if [[ "${MODE}" == "update" ]]; then
   echo
-  echo "업데이트 완료: ${KIOSK_VERSION}"
+  echo "업데이트 완료: 펌웨어 ${KIOSK_VERSION}"
   exit 0
 fi
 
 echo
 echo "설치 완료"
 echo "- 기기: ${DEVICE_MODEL} · ${OS_NAME}"
-echo "- 키오스크 스크립트 버전: ${KIOSK_VERSION}"
+echo "- 펌웨어 버전: ${KIOSK_VERSION}"
 echo "- 키오스크 URL: ${CLOUD_URL}"
 echo "- 관리자 모드 PIN: ${ADMIN_PIN}"
 echo "- 재부팅하면 Chromium 키오스크가 자동 실행됩니다: sudo reboot"
