@@ -299,28 +299,54 @@ def ethernet_status() -> dict[str, Any]:
     }
 
 
+def wifi_band(freq: str) -> str | None:
+    """nmcli FREQ(예: 5180 MHz)를 대역 이름(2.4GHz / 5GHz / 6GHz)으로 바꾼다."""
+    m = re.match(r"(\d+)", freq.strip())
+    if not m:
+        return None
+    mhz = int(m.group(1))
+    if mhz < 3000:
+        return "2.4GHz"
+    if mhz < 5925:
+        return "5GHz"
+    return "6GHz"
+
+
+def wifi_dbm(device: str) -> int | None:
+    """실제 수신 세기(dBm). iw가 없거나 연결이 없으면 None."""
+    proc = run(["iw", "dev", device, "link"], timeout=5)
+    m = re.search(r"signal:\s*(-?\d+)\s*dBm", proc.stdout) if proc.returncode == 0 else None
+    return int(m.group(1)) if m else None
+
+
 def wifi_status() -> dict[str, Any]:
     dev = first_device("wifi")
     radio = run(["nmcli", "radio", "wifi"], timeout=10).stdout.strip()
+    empty = {"ssid": None, "signal": None, "dbm": None, "band": None, "rate": None}
     if not dev:
-        return {"device": None, "connected": False, "state": "not_found", "radio": radio, "ssid": None, "signal": None, "addresses": [], "gateway": "", "dns": []}
-    ssid = None
-    signal = None
+        return {"device": None, "connected": False, "state": "not_found", "radio": radio, **empty, "addresses": [], "gateway": "", "dns": []}
+    info = dict(empty)
     if dev["state"] == "connected":
-        proc = run(["nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL", "device", "wifi", "list", "--rescan", "no"], timeout=10)
+        # 캐시된 검색 결과만 읽는다 (--rescan no): 자주 불러도 무선 연결에 부담이 없다
+        proc = run(["nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL,FREQ,RATE", "device", "wifi", "list", "ifname", dev["device"], "--rescan", "no"], timeout=10)
         for line in proc.stdout.splitlines():
             parts = split_terse(line)
-            if len(parts) >= 3 and parts[0] == "yes":
-                ssid = parts[1] or None
-                signal = int(parts[2]) if parts[2].isdigit() else None
+            if len(parts) >= 5 and parts[0] == "yes":
+                info.update(
+                    ssid=parts[1] or None,
+                    signal=int(parts[2]) if parts[2].isdigit() else None,
+                    band=wifi_band(parts[3]),
+                    rate=parts[4].strip() or None,
+                )
                 break
+        info["dbm"] = wifi_dbm(dev["device"])
     return {
         "device": dev["device"],
         "connected": dev["state"] == "connected",
         "state": dev["state"],
         "radio": radio,
-        "ssid": ssid or dev["connection"] or None,
-        "signal": signal,
+        **info,
+        "ssid": info["ssid"] or dev["connection"] or None,
         **device_ip(dev["device"]),
     }
 
@@ -343,11 +369,12 @@ def scan_wifi() -> list[dict[str, Any]]:
     ensure_wifi_radio()
     if not first_device("wifi"):
         raise RuntimeError("무선 네트워크 장치를 찾을 수 없어요")
-    out = nmcli_checked(["-t", "-f", "ACTIVE,SSID,SECURITY,SIGNAL", "device", "wifi", "list", "--rescan", "yes"], timeout=30, error="Wi‑Fi 검색에 실패했어요")
+    out = nmcli_checked(["-t", "-f", "ACTIVE,SSID,SECURITY,SIGNAL,FREQ", "device", "wifi", "list", "--rescan", "yes"], timeout=30, error="Wi‑Fi 검색에 실패했어요")
     best: dict[str, dict[str, Any]] = {}
+    bands: dict[str, set[str]] = {}
     for line in out.splitlines():
         parts = split_terse(line)
-        if len(parts) < 4:
+        if len(parts) < 5:
             continue
         ssid = parts[1].strip()
         if not ssid:
@@ -361,10 +388,16 @@ def scan_wifi() -> list[dict[str, Any]]:
             "signal": int(parts[3]) if parts[3].isdigit() else 0,
             "active": parts[0] == "yes",
             "enterprise": "802.1X" in security or "EAP" in security,
+            "band": wifi_band(parts[4]),
         }
+        if item["band"]:
+            bands.setdefault(ssid, set()).add(item["band"])
         prev = best.get(ssid)
         if prev is None or item["active"] or (not prev["active"] and item["signal"] > prev["signal"]):
             best[ssid] = item
+    for ssid, item in best.items():
+        # 같은 이름이 2.4/5GHz 모두 있으면 둘 다 표시 (신호·대역은 가장 센 AP 기준)
+        item["bands"] = sorted(bands.get(ssid, set()))
     return sorted(best.values(), key=lambda n: (not n["active"], -n["signal"]))[:30]
 
 
@@ -930,6 +963,7 @@ ROUTES: dict[tuple[str, str], Any] = {
     ("GET", "/network/status"): lambda b: network_status(),
     ("GET", "/wifi/scan"): lambda b: scan_wifi(),
     ("GET", "/ethernet/status"): lambda b: ethernet_status(),
+    ("GET", "/wifi/status"): lambda b: wifi_status(),
     ("GET", "/display/status"): lambda b: display_status(),
     ("GET", "/security/status"): lambda b: security_status(),
     ("POST", "/admin/logout"): lambda b: {"ok": True},

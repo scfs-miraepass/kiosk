@@ -5,6 +5,7 @@ import type React from "react";
 import { createContext, useCallback, useContext, useId, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { TouchKeyboard } from "../touch-keyboard";
+import { signalLevel } from "./local-api";
 
 /*
  * 관리자 모드 공통 UI.
@@ -294,5 +295,20 @@ export function BigButton({
     >
       {children}
     </button>
+  );
+}
+
+const SIGNAL_COLOR = { good: "bg-green-500", fair: "bg-amber-500", weak: "bg-red-500" } as const;
+
+/** Wi‑Fi 신호 막대 4칸. 세기에 따라 칸 수와 색(초록·주황·빨강)이 바뀐다. */
+export function SignalBars({ signal, size = "md", className }: { signal: number; size?: "md" | "lg"; className?: string }) {
+  const level = signalLevel(signal);
+  const heights = size === "lg" ? ["h-3", "h-5", "h-7", "h-9"] : ["h-1.5", "h-2.5", "h-3.5", "h-4.5"];
+  return (
+    <span className={cn("inline-flex shrink-0 items-end", size === "lg" ? "gap-1" : "gap-0.5", className)} role="img" aria-label={`신호 ${signal}% (${level.label})`}>
+      {heights.map((h, i) => (
+        <span key={h} className={cn("rounded-sm", size === "lg" ? "w-2" : "w-1", h, i < level.bars ? SIGNAL_COLOR[level.tone] : "bg-slate-200")} />
+      ))}
+    </span>
   );
 }

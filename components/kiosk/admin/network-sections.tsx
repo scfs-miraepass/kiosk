@@ -1,10 +1,10 @@
 "use client";
 
-import { Activity, Cable, ChevronRight, Loader2, Lock, RefreshCw, Wifi, WifiHigh, WifiLow, WifiZero } from "lucide-react";
+import { Activity, Cable, ChevronRight, Loader2, Lock, RefreshCw, Wifi } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { AdminField, BigButton, Card, InfoGrid, Notice, type NoticeState, Segmented, SectionHeader, StatusDot } from "./admin-ui";
+import { AdminField, BigButton, Card, InfoGrid, Notice, type NoticeState, Segmented, SectionHeader, SignalBars, StatusDot } from "./admin-ui";
 import {
   deviceStateLabel,
   type EthernetStatus,
@@ -12,9 +12,14 @@ import {
   type Health,
   localApi,
   type NetworkStatus,
+  signalLevel,
+  WEAK_SIGNAL,
   type WifiNetwork,
   type WifiStatus,
 } from "./local-api";
+
+/** Wi‑Fi 화면을 보는 동안 신호 세기를 다시 읽는 간격 */
+const WIFI_POLL_MS = 5000;
 
 export type AdminSection = "status" | "ethernet" | "wifi" | "display" | "security" | "token" | "power";
 
@@ -77,6 +82,7 @@ export function StatusSection({ network, networkLoading, refreshNetwork, disable
             status={network?.wifi}
             kind="wifi"
             extra={network?.wifi.ssid ?? undefined}
+            signal={network?.wifi.connected ? network.wifi.signal : null}
             onClick={() => onNavigate("wifi")}
           />
         </div>
@@ -102,6 +108,7 @@ function SummaryCard({
   status,
   kind,
   extra,
+  signal,
   onClick,
 }: {
   icon: React.ReactNode;
@@ -109,6 +116,7 @@ function SummaryCard({
   status?: EthernetStatus | WifiStatus;
   kind: "ethernet" | "wifi";
   extra?: string;
+  signal?: number | null;
   onClick: () => void;
 }) {
   return (
@@ -122,6 +130,12 @@ function SummaryCard({
           {extra && <span className="truncate">· {extra}</span>}
         </p>
         {status?.connected && <p className="mt-1 truncate text-sm font-semibold text-slate-800">{ipText(status)}</p>}
+        {signal != null && (
+          <p className={cn("mt-1.5 flex items-center gap-2 text-sm font-semibold", signal < WEAK_SIGNAL ? "text-red-600" : "text-slate-700")}>
+            <SignalBars signal={signal} />
+            신호 {signal}% · {signalLevel(signal).label}
+          </p>
+        )}
       </div>
       <ChevronRight className="size-6 text-slate-400" />
     </button>
@@ -259,13 +273,49 @@ export function EthernetSection({ network, networkLoading, refreshNetwork, disab
 
 // ───────────────────────── Wi‑Fi ─────────────────────────
 
-function SignalIcon({ signal }: { signal: number }) {
-  const Icon = signal >= 70 ? WifiHigh : signal >= 40 ? Wifi : signal >= 15 ? WifiLow : WifiZero;
-  return <Icon className="size-6 shrink-0 text-slate-600" />;
+/** 현재 연결의 신호 세기: 큰 막대 + % + 문구, 아래에 dBm·대역·속도 */
+function SignalPanel({ status }: { status: WifiStatus }) {
+  if (status.signal == null) return null;
+  const level = signalLevel(status.signal);
+  const details = [status.dbm != null ? `${status.dbm} dBm` : null, status.band, status.rate].filter(Boolean).join(" · ");
+  return (
+    <div className="mb-4 space-y-3">
+      <div className="flex items-center gap-4 rounded-2xl bg-slate-50 p-4">
+        <SignalBars signal={status.signal} size="lg" />
+        <div className="min-w-0">
+          <p className="text-2xl font-extrabold text-slate-900">
+            {status.signal}% <span className="text-lg font-bold text-slate-600">{level.label}</span>
+          </p>
+          {details && <p className="text-sm text-slate-500">{details}</p>}
+        </div>
+      </div>
+      {status.signal < WEAK_SIGNAL && (
+        <Notice tone="warning" className="text-sm">
+          신호가 약해요. 주문·결제 중 연결이 끊길 수 있으니 공유기를 가까이 두거나 유선 LAN 연결을 권장해요.
+        </Notice>
+      )}
+    </div>
+  );
 }
 
 export function WifiSection({ network, networkLoading, refreshNetwork, disabled }: NetworkProps) {
-  const status = network?.wifi ?? null;
+  // 신호 세기는 계속 바뀌므로 이 화면을 보는 동안 가볍게 다시 읽는다 (캐시된 값, 재검색 없음)
+  const [live, setLive] = useState<WifiStatus | null>(null);
+  useEffect(() => {
+    if (disabled) return;
+    let alive = true;
+    const poll = () =>
+      localApi<WifiStatus>("/wifi/status", { timeoutMs: 8000 })
+        .then((next) => alive && setLive(next))
+        .catch(() => {});
+    void poll();
+    const timer = setInterval(poll, WIFI_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [disabled]);
+  const status = live ?? network?.wifi ?? null;
   const [networks, setNetworks] = useState<WifiNetwork[] | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -346,6 +396,8 @@ export function WifiSection({ network, networkLoading, refreshNetwork, disabled 
           {noDevice ? (
             <Notice tone="warning">무선 네트워크 장치를 찾을 수 없어요.</Notice>
           ) : (
+            <>
+            {status?.connected && <SignalPanel status={status} />}
             <InfoGrid
               rows={[
                 [
@@ -359,10 +411,11 @@ export function WifiSection({ network, networkLoading, refreshNetwork, disabled 
                     "확인 중…"
                   ),
                 ],
-                ["네트워크", status?.ssid ? `${status.ssid}${status.signal != null ? ` · 신호 ${status.signal}%` : ""}` : ""],
+                ["네트워크", status?.connected ? (status.ssid ?? "") : ""],
                 ["IP 주소", status ? ipText(status) : ""],
               ]}
             />
+            </>
           )}
         </Card>
 
@@ -430,11 +483,16 @@ export function WifiSection({ network, networkLoading, refreshNetwork, disabled 
                     onClick={() => openForm({ ssid: n.ssid, enterprise: n.enterprise, hidden: false })}
                     className={cn("flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left active:bg-slate-100 disabled:opacity-50", n.active && "bg-green-50")}
                   >
-                    <SignalIcon signal={n.signal} />
+                    <span className="flex w-12 shrink-0 flex-col items-center gap-1">
+                      <SignalBars signal={n.signal} />
+                      <span className={cn("text-xs font-bold", n.signal < WEAK_SIGNAL ? "text-red-600" : "text-slate-600")}>{n.signal}%</span>
+                    </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-lg font-bold text-slate-900">{n.ssid}</span>
                       <span className="block text-sm text-slate-500">
-                        {n.security ? (n.enterprise ? "기업용 보안" : "보안") : "개방형"} · 신호 {n.signal}%
+                        {[n.security ? (n.enterprise ? "기업용 보안" : "보안") : "개방형", signalLevel(n.signal).label, n.bands.length ? n.bands.join(" / ") : n.band]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </span>
                     </span>
                     {n.active && <span className="rounded-full bg-green-600 px-3 py-1 text-sm font-bold text-white">연결됨</span>}

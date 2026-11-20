@@ -72,7 +72,14 @@ export type WifiStatus = IpInfo & {
   state: string;
   radio: string;
   ssid: string | null;
+  /** nmcli 신호 세기 0~100 (%) */
   signal: number | null;
+  /** 실제 수신 세기 (dBm, iw로 읽음). 읽을 수 없으면 null */
+  dbm: number | null;
+  /** "2.4GHz" | "5GHz" | "6GHz" */
+  band: string | null;
+  /** 연결 속도, 예: "270 Mbit/s" */
+  rate: string | null;
 };
 
 export type NetworkStatus = {
@@ -83,7 +90,28 @@ export type NetworkStatus = {
   wifi: WifiStatus;
 };
 
-export type WifiNetwork = { ssid: string; security: string; signal: number; active: boolean; enterprise: boolean };
+export type WifiNetwork = {
+  ssid: string;
+  security: string;
+  signal: number;
+  active: boolean;
+  enterprise: boolean;
+  /** 가장 센 AP의 대역 */
+  band: string | null;
+  /** 같은 이름으로 잡힌 모든 대역 (예: ["2.4GHz", "5GHz"]) */
+  bands: string[];
+};
+
+/** 신호 세기(%) → 막대 수·문구·색 */
+export function signalLevel(signal: number) {
+  if (signal >= 75) return { bars: 4, label: "매우 좋음", tone: "good" as const };
+  if (signal >= 50) return { bars: 3, label: "좋음", tone: "good" as const };
+  if (signal >= 30) return { bars: 2, label: "보통", tone: "fair" as const };
+  return { bars: 1, label: "약함", tone: "weak" as const };
+}
+
+/** 이 값보다 약하면 결제 중 끊길 수 있다고 안내한다 */
+export const WEAK_SIGNAL = 30;
 
 /** nmcli 장치 상태를 화면용 한글로 */
 export function deviceStateLabel(state: string, kind: "ethernet" | "wifi") {

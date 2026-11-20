@@ -396,12 +396,15 @@ async function loadWifi() {
     if (!s.device) { setRows($("wifi-status"), [["상태", "무선 네트워크 장치를 찾을 수 없어요"]]); return; }
     setRows($("wifi-status"), [
       ["상태", stateLabel(s.state, "wifi")],
-      ["네트워크", s.ssid ? s.ssid + (s.signal != null ? " · 신호 " + s.signal + "%" : "") : ""],
+      ["네트워크", s.connected ? s.ssid || "" : ""],
+      ["신호", s.connected && s.signal != null ? bars(s.signal) + "  " + s.signal + "% · " + level(s.signal) + [s.dbm != null ? s.dbm + " dBm" : "", s.band, s.rate].filter(Boolean).map((v) => " · " + v).join("") : ""],
       ["IP 주소", s.addresses.join(", ")],
     ]);
   } catch (e) { setRows($("wifi-status"), [["상태", e.message]]); }
 }
-const bars = (sig) => sig >= 70 ? "▂▄▆█" : sig >= 40 ? "▂▄▆_" : sig >= 15 ? "▂▄__" : "▂___";
+// 관리자 모드와 같은 기준: 75↑ 매우 좋음, 50↑ 좋음, 30↑ 보통, 그 아래 약함
+const bars = (sig) => sig >= 75 ? "▂▄▆█" : sig >= 50 ? "▂▄▆_" : sig >= 30 ? "▂▄__" : "▂___";
+const level = (sig) => sig >= 75 ? "매우 좋음" : sig >= 50 ? "좋음" : sig >= 30 ? "보통" : "약함";
 async function scan() {
   scanned = true;
   $("wifi-scan").disabled = true; $("wifi-scan").textContent = "검색 중…";
@@ -417,7 +420,7 @@ async function scan() {
       const sig = document.createElement("span"); sig.className = "bars"; sig.textContent = bars(n.signal);
       const grow = document.createElement("span"); grow.className = "grow";
       const ssid = document.createElement("span"); ssid.className = "ssid"; ssid.textContent = n.ssid;
-      const meta = document.createElement("span"); meta.className = "meta"; meta.textContent = (n.security ? (n.enterprise ? "기업용 보안" : "보안") : "개방형") + " · 신호 " + n.signal + "%";
+      const meta = document.createElement("span"); meta.className = "meta"; meta.textContent = [(n.security ? (n.enterprise ? "기업용 보안" : "보안") : "개방형"), "신호 " + n.signal + "% " + level(n.signal), (n.bands && n.bands.length ? n.bands.join(" / ") : n.band)].filter(Boolean).join(" · ");
       grow.append(ssid, meta); b.append(sig, grow);
       if (n.active) { const badge = document.createElement("span"); badge.className = "badge"; badge.textContent = "연결됨"; b.append(badge); }
       b.onclick = () => openWifiForm(n.ssid, n.enterprise, false);
