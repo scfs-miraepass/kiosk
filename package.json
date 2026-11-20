@@ -1,6 +1,6 @@
 {
   "name": "miraepass-kiosk",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "private": true,
   "description": "순천미래과학고 교내 카페 키오스크 (MIRAEPASS 결제)",
   "workspaces": [
