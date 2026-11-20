@@ -189,7 +189,7 @@ export function KioskAdminPanel({ onClose, onTokenRegistered }: Props) {
                 {section === "wifi" && <WifiSection {...netProps} />}
                 {section === "display" && <DisplaySection disabled={!connected} />}
                 {section === "security" && <SecuritySection disabled={!connected} />}
-                {section === "update" && <UpdateSection disabled={!connected} onUpdated={() => void checkHealth()} />}
+                {section === "update" && <UpdateSection disabled={!connected} onUpdated={checkHealth} />}
                 {section === "token" && <TokenSection onTokenRegistered={onTokenRegistered} />}
                 {section === "power" && <PowerSection health={health} />}
               </div>

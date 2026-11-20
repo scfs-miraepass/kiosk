@@ -143,22 +143,33 @@ export type SecurityStatus = {
 };
 
 export type UpdateState = "checking" | "downloading" | "installing" | "done" | "uptodate" | "failed";
+export const UPDATE_TERMINAL_STATES: readonly UpdateState[] = ["done", "uptodate", "failed"];
 
 export type UpdateStatus = {
   /** 기기 스크립트 버전 */
   version: string;
-  bundleHash: string;
+  /** 업데이트를 받는 GitHub 저장소 (owner/repo) */
+  repo: string;
   /** 업데이트가 지금 진행 중인지 */
   running: boolean;
   /** 자동 업데이트(매일 새벽) 켜짐 */
   auto: boolean;
   /** 다음 자동 업데이트 예정 시각 (systemd 표기) */
   nextRun: string;
-  last: { state: UpdateState; message: string; manual: boolean; fromVersion?: string; toVersion?: string; updatedAt: number } | null;
+  last: {
+    state: UpdateState;
+    message: string;
+    manual: boolean;
+    /** 관리자 모드에서 요청한 실행이면 그 요청 ID (자동 실행은 null) */
+    requestId?: string | null;
+    fromVersion?: string;
+    toVersion?: string;
+    updatedAt: number;
+  } | null;
   log: string;
 };
 
-export type UpdateCheck = { current: string; latest: string; updateAvailable: boolean };
+export type UpdateCheck = { current: string; latest: string; updateAvailable: boolean; repo: string };
 
 /** 키오스크 앱 버전 (빌드할 때 package.json에서 넣음, next.config.ts) */
 export const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "";

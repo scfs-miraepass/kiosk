@@ -30,6 +30,8 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -39,8 +41,6 @@ HOST = "127.0.0.1"
 PORT = int(os.environ.get("MIRAEPASS_KIOSK_CONTROL_PORT", "8765"))
 # 설치한 키오스크 저장소 버전 (install.sh가 package.json·git 커밋에서 읽어 기록. 예: "1.1.1+a1b2c3d")
 VERSION = os.environ.get("MIRAEPASS_KIOSK_VERSION", "").strip() or "unknown"
-# 설치된 스크립트 묶음의 내용 해시. 서버의 묶음 해시와 다르면 업데이트가 있는 것으로 본다.
-BUNDLE_HASH = os.environ.get("MIRAEPASS_KIOSK_BUNDLE_HASH", "").strip()
 ADMIN_PIN = os.environ.get("MIRAEPASS_KIOSK_ADMIN_PIN", "2580")
 ALLOW_POWER = os.environ.get("MIRAEPASS_KIOSK_ALLOW_POWER") == "1"
 KIOSK_URL = os.environ.get("MIRAEPASS_KIOSK_URL", "")
@@ -563,8 +563,10 @@ def save_rotation(rotation: str) -> None:
             lines = f.read().splitlines()
     except FileNotFoundError:
         lines = []
-    out = [line for line in lines if not line.startswith("DISPLAY_ROTATE=")]
-    out.append(f"DISPLAY_ROTATE={rotation}")
+    # 줄 위치는 그대로 두고 값만 바꾼다 (없으면 끝에 추가)
+    out = [f"DISPLAY_ROTATE={rotation}" if line.startswith("DISPLAY_ROTATE=") else line for line in lines]
+    if not any(line.startswith("DISPLAY_ROTATE=") for line in lines):
+        out.append(f"DISPLAY_ROTATE={rotation}")
     directory = os.path.dirname(KIOSK_ENV_FILE) or "."
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".miraepass-kiosk.")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -997,17 +999,24 @@ def power_action(action: str) -> dict[str, Any]:
 
 # ───────────────────────── 업데이트 ─────────────────────────
 #
-# 기기 스크립트는 클라우드 키오스크 서버(/api/kiosk/device-bundle)에서 받는다.
-# 서버의 Docker 이미지가 같은 커밋의 scripts/kiosk-device를 담고 있으므로, 업데이트하면 앱과 버전이 맞춰진다.
-# 실제 적용은 miraepass-kiosk-update.service(별도 프로세스)가 한다. 적용 중 로컬 서비스가 재시작돼도 끊기지 않게 하기 위해서다.
+# 기기 스크립트는 GitHub 저장소의 최신 정식 릴리스(태그)에서 받는다. (dev 프리릴리스는 받지 않는다)
+#   1) releases/latest 로 최신 버전만 확인 (작은 요청 하나) → 기기보다 높을 때만
+#   2) 그 태그의 scripts/kiosk-device 파일을 받아 git blob 해시로 검증
+#   3) 받은 install.sh --update 로 적용. 실패하면 백업으로 되돌린다.
+# 적용은 miraepass-kiosk-update.service(별도 프로세스)가 한다. 적용 중 로컬 서비스가 재시작돼도 끊기지 않게 하기 위해서다.
 
+UPDATE_REPO = os.environ.get("MIRAEPASS_KIOSK_UPDATE_REPO", "").strip() or "scfs-miraepass/kiosk"
+GITHUB_API = os.environ.get("MIRAEPASS_KIOSK_GITHUB_API", "https://api.github.com").rstrip("/")
+BUNDLE_PATH = "scripts/kiosk-device"
 UPDATE_UNIT = "miraepass-kiosk-update.service"
 UPDATE_TIMER = "miraepass-kiosk-update.timer"
 UPDATE_DIR = os.environ.get("MIRAEPASS_KIOSK_UPDATE_DIR", "/var/lib/miraepass/update")
 UPDATE_STATUS_FILE = os.path.join(UPDATE_DIR, "status.json")
 UPDATE_REQUEST_FILE = os.path.join(UPDATE_DIR, "request.json")
 UPDATE_LOG_FILE = os.path.join(UPDATE_DIR, "update.log")
-# 업데이트가 덮어쓰는 파일. 실패하면 이 백업으로 되돌린다.
+UPDATE_LOG_KEEP_LINES = 400  # 지난 실행 기록도 남기되 너무 길어지지 않게
+TERMINAL_STATES = ("done", "uptodate", "failed")
+# 업데이트가 덮어쓰거나 새로 만드는 파일. 실패하면 이 목록 그대로 되돌린다 (없던 파일은 지운다).
 DEPLOYED_FILES = (
     "/usr/local/bin/miraepass-kiosk-control.py",
     "/usr/local/bin/miraepass-kiosk-session",
@@ -1020,6 +1029,9 @@ DEPLOYED_FILES = (
     "/etc/systemd/system/miraepass-kiosk-control.service",
     "/etc/systemd/system/miraepass-kiosk-update.service",
     "/etc/systemd/system/miraepass-kiosk-update.timer",
+    "/etc/systemd/system/miraepass-firewall.service",
+    "/etc/miraepass/firewall.nft",
+    "/etc/X11/xorg.conf.d/99-miraepass-touch-rotation.conf",
     "/etc/chromium/policies/managed/miraepass-kiosk.json",
     "/etc/chromium-browser/policies/managed/miraepass-kiosk.json",
     "/etc/opt/chrome/policies/managed/miraepass-kiosk.json",
@@ -1027,58 +1039,114 @@ DEPLOYED_FILES = (
 BUNDLE_EXCLUDE = {"README.md"}
 
 
-def bundle_files_of_dir(directory: str) -> list[str]:
-    """묶음에 들어가는 파일: 폴더 바로 아래의 일반 파일 (README·숨김·캐시 제외). 서버(lib/device-bundle.ts)와 같은 규칙."""
-    names = []
-    for name in sorted(os.listdir(directory)):
-        full = os.path.join(directory, name)
-        if name.startswith(".") or name in BUNDLE_EXCLUDE or name.endswith(".pyc") or not os.path.isfile(full):
+def is_bundle_file(name: str) -> bool:
+    """기기에 설치하는 파일: 폴더 바로 아래의 일반 파일 (README·숨김·캐시 제외)."""
+    return bool(name) and not name.startswith(".") and name not in BUNDLE_EXCLUDE and not name.endswith(".pyc") and "/" not in name and "\\" not in name
+
+
+def parse_version(version: str) -> tuple[tuple[int, int, int], tuple[Any, ...]] | None:
+    """'v1.2.3-dev.4+abc' → ((1,2,3), ('dev', 4)). 정식 릴리스는 프리릴리스보다 높다. 해석할 수 없으면 None."""
+    m = re.match(r"^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+.*)?$", version.strip())
+    if not m:
+        return None
+    core = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    pre = tuple(int(p) if p.isdigit() else p for p in m.group(4).split(".")) if m.group(4) else ()
+    return core, pre
+
+
+def _compare_pre(a: tuple[Any, ...], b: tuple[Any, ...]) -> int:
+    """semver 프리릴리스 비교: 없음(정식) > 있음, 숫자 < 문자, 앞부분이 같으면 짧은 쪽이 낮다."""
+    if a == b:
+        return 0
+    if not a:
+        return 1
+    if not b:
+        return -1
+    for x, y in zip(a, b):
+        if x == y:
             continue
-        names.append(name)
-    return names
+        if isinstance(x, int) and isinstance(y, int):
+            return 1 if x > y else -1
+        if isinstance(x, int) != isinstance(y, int):
+            return -1 if isinstance(x, int) else 1
+        return 1 if str(x) > str(y) else -1
+    return 1 if len(a) > len(b) else -1
 
 
-def bundle_hash(entries: list[tuple[str, str]]) -> str:
-    """[(파일 이름, sha256)] → 묶음 해시. 서버와 같은 계산: sha256("이름\0해시\n" ... 이름순)"""
-    h = hashlib.sha256()
-    for name, digest in sorted(entries):
-        h.update(f"{name}\0{digest}\n".encode())
-    return h.hexdigest()
+def version_newer(latest: str, current: str) -> bool:
+    """latest가 current보다 높은지. 설치 버전을 알 수 없으면(unknown 등) 업데이트한다."""
+    lv, cv = parse_version(latest), parse_version(current)
+    if lv is None:
+        return False
+    if cv is None:
+        return True
+    if lv[0] != cv[0]:
+        return lv[0] > cv[0]
+    return _compare_pre(lv[1], cv[1]) > 0
 
 
-def bundle_hash_of_dir(directory: str) -> str:
-    entries = []
-    for name in bundle_files_of_dir(directory):
-        with open(os.path.join(directory, name), "rb") as f:
-            entries.append((name, hashlib.sha256(f.read()).hexdigest()))
-    return bundle_hash(entries)
-
-
-def bundle_url(meta: bool = False) -> str:
-    override = os.environ.get("MIRAEPASS_KIOSK_UPDATE_URL", "").strip()
-    if override:
-        base = override
-    else:
-        if not KIOSK_URL:
-            raise RuntimeError("키오스크 주소가 설정되지 않았어요")
-        parts = urlsplit(KIOSK_URL)
-        base = f"{parts.scheme}://{parts.netloc}/api/kiosk/device-bundle"
-    return f"{base}?meta=1" if meta else base
-
-
-def fetch_bundle(meta: bool = False) -> dict[str, Any]:
-    req = urllib.request.Request(bundle_url(meta), headers={"Accept": "application/json", "User-Agent": f"miraepass-kiosk-device/{VERSION}"})
+def _http_json(url: str) -> Any:
+    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": f"miraepass-kiosk-device/{VERSION}"})
     try:
         with urllib.request.urlopen(req, timeout=30) as res:
-            body = json.loads(res.read().decode("utf-8"))
+            return json.loads(res.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raise FileNotFoundError(url) from None
+        if exc.code == 403:
+            raise RuntimeError("GitHub 요청 한도를 넘었어요. 잠시 뒤 다시 시도해 주세요") from None
+        raise RuntimeError(f"GitHub 요청에 실패했어요 (HTTP {exc.code})") from None
     except Exception as exc:
-        raise RuntimeError(f"업데이트 서버에 연결하지 못했어요: {exc}") from None
-    if not isinstance(body, dict) or not body.get("success"):
-        raise RuntimeError("업데이트 정보를 받지 못했어요")
-    data = body["data"]
-    if not isinstance(data, dict) or not data.get("hash") or not data.get("version"):
-        raise RuntimeError("업데이트 정보가 올바르지 않아요")
-    return data
+        raise RuntimeError(f"GitHub에 연결하지 못했어요: {exc}") from None
+
+
+def latest_release() -> dict[str, str]:
+    try:
+        data = _http_json(f"{GITHUB_API}/repos/{UPDATE_REPO}/releases/latest")
+    except FileNotFoundError:
+        raise RuntimeError(f"{UPDATE_REPO} 저장소에서 릴리스를 찾지 못했어요") from None
+    tag = str(data.get("tag_name", "")) if isinstance(data, dict) else ""
+    if not parse_version(tag):
+        raise RuntimeError(f"최신 릴리스 태그를 해석하지 못했어요: {tag!r}")
+    return {"tag": tag, "version": tag.lstrip("v")}
+
+
+def git_blob_sha(content: bytes) -> str:
+    """GitHub contents API가 주는 파일 sha와 같은 값 (git blob 해시)."""
+    return hashlib.sha1(b"blob %d\0" % len(content) + content).hexdigest()
+
+
+def download_release_files(tag: str, dest: str) -> list[str]:
+    try:
+        listing = _http_json(f"{GITHUB_API}/repos/{UPDATE_REPO}/contents/{BUNDLE_PATH}?ref={urllib.parse.quote(tag)}")
+    except FileNotFoundError:
+        raise RuntimeError(f"{tag} 릴리스에는 기기 스크립트({BUNDLE_PATH})가 없어요") from None
+    if not isinstance(listing, list):
+        raise RuntimeError("기기 스크립트 목록을 받지 못했어요")
+    names = []
+    for item in listing:
+        name = str(item.get("name", ""))
+        if item.get("type") != "file" or not is_bundle_file(name):
+            continue
+        url = str(item.get("download_url") or "")
+        if not url.startswith("https://"):
+            raise RuntimeError(f"다운로드 주소가 올바르지 않아요: {name}")
+        req = urllib.request.Request(url, headers={"User-Agent": f"miraepass-kiosk-device/{VERSION}"})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as res:
+                content = res.read()
+        except Exception as exc:
+            raise RuntimeError(f"{name}을(를) 받지 못했어요: {exc}") from None
+        if git_blob_sha(content) != item.get("sha"):
+            raise RuntimeError(f"받은 파일이 손상됐어요: {name}")
+        path = os.path.join(dest, name)
+        with open(path, "wb") as f:
+            f.write(content)
+        os.chmod(path, 0o755 if name.endswith((".sh", ".py")) else 0o644)
+        names.append(name)
+    if "install.sh" not in names:
+        raise RuntimeError(f"{tag} 릴리스에 install.sh가 없어요")
+    return names
 
 
 def _read_json(path: str) -> dict[str, Any]:
@@ -1100,7 +1168,7 @@ def _write_status(**fields: Any) -> None:
     os.replace(tmp, UPDATE_STATUS_FILE)
 
 
-def _log_tail(lines: int = 40) -> str:
+def _log_tail(lines: int = 60) -> str:
     try:
         with open(UPDATE_LOG_FILE, encoding="utf-8", errors="replace") as f:
             return "".join(f.readlines()[-lines:])
@@ -1108,18 +1176,29 @@ def _log_tail(lines: int = 40) -> str:
         return ""
 
 
+def _trim_log() -> None:
+    try:
+        with open(UPDATE_LOG_FILE, encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+        if len(lines) > UPDATE_LOG_KEEP_LINES:
+            with open(UPDATE_LOG_FILE, "w", encoding="utf-8") as f:
+                f.writelines(lines[-UPDATE_LOG_KEEP_LINES:])
+    except OSError:
+        pass
+
+
+def _unit_running(unit: str) -> bool:
+    return run(["systemctl", "is-active", unit], timeout=10).stdout.strip() in ("active", "activating")
+
+
 def update_status() -> dict[str, Any]:
     status = _read_json(UPDATE_STATUS_FILE)
-    running = run(["systemctl", "is-active", UPDATE_UNIT], timeout=10).stdout.strip() in ("active", "activating")
     auto = run(["systemctl", "is-enabled", UPDATE_TIMER], timeout=10).stdout.strip() == "enabled"
-    next_run = ""
-    if auto:
-        proc = run(["systemctl", "show", UPDATE_TIMER, "-p", "NextElapseUSecRealtime", "--value"], timeout=10)
-        next_run = proc.stdout.strip()
+    next_run = run(["systemctl", "show", UPDATE_TIMER, "-p", "NextElapseUSecRealtime", "--value"], timeout=10).stdout.strip() if auto else ""
     return {
         "version": VERSION,
-        "bundleHash": BUNDLE_HASH,
-        "running": running,
+        "repo": UPDATE_REPO,
+        "running": _unit_running(UPDATE_UNIT),
         "auto": auto,
         "nextRun": next_run,
         "last": status or None,
@@ -1128,24 +1207,27 @@ def update_status() -> dict[str, Any]:
 
 
 def check_update() -> dict[str, Any]:
-    meta = fetch_bundle(meta=True)
-    return {
-        "current": VERSION,
-        "latest": meta["version"],
-        "updateAvailable": meta["hash"] != BUNDLE_HASH,
-    }
+    release = latest_release()
+    return {"current": VERSION, "latest": release["version"], "updateAvailable": version_newer(release["version"], VERSION), "repo": UPDATE_REPO}
 
 
 def request_update(force: bool) -> dict[str, Any]:
-    if run(["systemctl", "is-active", UPDATE_UNIT], timeout=10).stdout.strip() in ("active", "activating"):
+    if _unit_running(UPDATE_UNIT):
         raise RuntimeError("이미 업데이트가 진행 중이에요")
     os.makedirs(UPDATE_DIR, exist_ok=True)
+    request_id = secrets.token_hex(8)
     with open(UPDATE_REQUEST_FILE, "w", encoding="utf-8") as f:
-        json.dump({"force": force, "requestedAt": int(time.time())}, f)
+        json.dump({"force": force, "requestId": request_id}, f)
     proc = run(["systemctl", "start", "--no-block", UPDATE_UNIT], timeout=10)
     if proc.returncode != 0:
+        # 남겨 두면 다음 자동 업데이트가 '수동·강제'로 착각한다
+        try:
+            os.unlink(UPDATE_REQUEST_FILE)
+        except FileNotFoundError:
+            pass
         raise RuntimeError(f"업데이트를 시작하지 못했어요: {proc.stdout.strip()[-300:]}")
-    return update_status()
+    # 화면은 이 requestId가 붙은 결과가 나올 때까지 기다린다 (지난 실행 결과와 섞이지 않도록)
+    return {**update_status(), "requestId": request_id}
 
 
 def set_auto_update(enabled: bool) -> dict[str, Any]:
@@ -1156,26 +1238,48 @@ def set_auto_update(enabled: bool) -> dict[str, Any]:
 
 
 def _backup_deployed(backup_dir: str) -> None:
+    """덮어쓸 파일을 복사해 두고, 지금 없는 파일은 목록에 적어 둔다 (되돌릴 때 지우도록)."""
     shutil.rmtree(backup_dir, ignore_errors=True)
     os.makedirs(backup_dir)
+    missing = []
     for path in DEPLOYED_FILES:
         if os.path.exists(path):
             dest = os.path.join(backup_dir, path.lstrip("/"))
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             shutil.copy2(path, dest)
+        else:
+            missing.append(path)
+    with open(os.path.join(backup_dir, "missing.json"), "w", encoding="utf-8") as f:
+        json.dump(missing, f)
 
 
 def _restore_deployed(backup_dir: str, log: Any) -> None:
+    missing = set(_read_json_list(os.path.join(backup_dir, "missing.json")))
     for path in DEPLOYED_FILES:
         src = os.path.join(backup_dir, path.lstrip("/"))
-        if os.path.exists(src):
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            shutil.copy2(src, path)
+        try:
+            if os.path.exists(src):
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                shutil.copy2(src, path)
+            elif path in missing and os.path.exists(path):
+                os.unlink(path)  # 업데이트가 새로 만든 파일
+        except OSError as exc:
+            log.write(f"되돌리기 실패: {path}: {exc}\n")
     run(["systemctl", "daemon-reload"], timeout=30)
-    for unit in ("miraepass-kiosk-control.service", "miraepass-kiosk.service"):
+    # 이전 프로그램과 이전 방화벽 규칙으로 다시 시작한다
+    for unit in ("miraepass-firewall.service", "miraepass-kiosk-control.service", "miraepass-kiosk.service"):
         if run(["systemctl", "is-active", unit], timeout=10).stdout.strip() == "active":
             run(["systemctl", "restart", unit], timeout=60)
     log.write("이전 파일로 되돌렸어요.\n")
+
+
+def _read_json_list(path: str) -> list[str]:
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return [str(x) for x in data] if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
 
 
 def _wait_health(expect_version: str, seconds: int = 30) -> bool:
@@ -1204,62 +1308,52 @@ def run_update() -> int:
     os.makedirs(UPDATE_DIR, exist_ok=True)
     stage = os.path.join(UPDATE_DIR, "stage")
     backup = os.path.join(UPDATE_DIR, "backup")
+    _trim_log()
 
-    with open(UPDATE_LOG_FILE, "w", encoding="utf-8") as log:
+    with open(UPDATE_LOG_FILE, "a", encoding="utf-8") as log:
+        log.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} {'수동' if manual else '자동'} 업데이트 (현재 v{VERSION}) =====\n")
+
         def step(state: str, message: str) -> None:
-            log.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
+            log.write(f"[{time.strftime('%H:%M:%S')}] {message}\n")
             log.flush()
-            _write_status(state=state, message=message, manual=manual, fromVersion=VERSION)
+            _write_status(state=state, message=message, manual=manual, fromVersion=VERSION, requestId=request.get("requestId"))
 
+        backed_up = False
         try:
-            step("checking", "업데이트를 확인하고 있어요")
-            bundle = fetch_bundle()
-            if bundle["hash"] == BUNDLE_HASH and not force:
-                step("uptodate", f"이미 최신 버전이에요 (v{VERSION})")
+            step("checking", f"GitHub({UPDATE_REPO})에서 최신 릴리스를 확인하고 있어요")
+            release = latest_release()
+            if not force and not version_newer(release["version"], VERSION):
+                step("uptodate", f"이미 최신 버전이에요 (기기 v{VERSION}, 최신 릴리스 v{release['version']})")
                 return 0
 
-            step("downloading", f"v{bundle['version']} 파일을 받는 중이에요")
+            step("downloading", f"v{release['version']} 파일을 받는 중이에요")
             shutil.rmtree(stage, ignore_errors=True)
             os.makedirs(stage)
-            entries = []
-            for item in bundle.get("files", []):
-                name = str(item.get("path", ""))
-                # 묶음은 한 폴더의 파일만 담는다. 경로가 섞여 있으면 거부한다.
-                if not name or "/" in name or "\\" in name or name.startswith("."):
-                    raise RuntimeError(f"잘못된 파일 이름: {name!r}")
-                content = base64.b64decode(item.get("content", ""))
-                digest = hashlib.sha256(content).hexdigest()
-                if digest != item.get("sha256"):
-                    raise RuntimeError(f"파일이 손상됐어요: {name}")
-                with open(os.path.join(stage, name), "wb") as f:
-                    f.write(content)
-                os.chmod(os.path.join(stage, name), 0o755 if int(item.get("mode", 0o644)) & 0o111 else 0o644)
-                entries.append((name, digest))
-            if bundle_hash(entries) != bundle["hash"]:
-                raise RuntimeError("받은 파일이 업데이트 정보와 맞지 않아요")
-            if not os.path.exists(os.path.join(stage, "install.sh")):
-                raise RuntimeError("업데이트에 install.sh가 없어요")
+            download_release_files(release["tag"], stage)
 
-            step("installing", f"v{bundle['version']} 적용 중이에요 (화면이 다시 시작될 수 있어요)")
+            step("installing", f"v{release['version']} 적용 중이에요 (화면이 다시 시작될 수 있어요)")
             _backup_deployed(backup)
-            env = {**os.environ, "KIOSK_VERSION": str(bundle["version"]), "KIOSK_BUNDLE_HASH": str(bundle["hash"])}
+            backed_up = True
+            env = {**os.environ, "KIOSK_VERSION": release["version"]}
             proc = subprocess.run(["bash", os.path.join(stage, "install.sh"), "--update"], stdout=log, stderr=subprocess.STDOUT, env=env, timeout=900, check=False)
             if proc.returncode != 0:
-                log.write(f"install.sh --update 실패 (종료 코드 {proc.returncode})\n")
-                _restore_deployed(backup, log)
-                step("failed", "업데이트를 적용하지 못해 이전 버전으로 되돌렸어요")
-                return 1
-            if not _wait_health(str(bundle["version"])):
-                log.write("업데이트 후 로컬 서비스가 응답하지 않아요\n")
-                _restore_deployed(backup, log)
-                step("failed", "업데이트 후 서비스가 동작하지 않아 이전 버전으로 되돌렸어요")
-                return 1
-            step("done", f"v{bundle['version']}(으)로 업데이트했어요")
-            _write_status(toVersion=bundle["version"])
+                raise RuntimeError(f"install.sh --update 실패 (종료 코드 {proc.returncode})")
+            if not _wait_health(release["version"]):
+                raise RuntimeError("업데이트 후 로컬 서비스가 새 버전으로 응답하지 않아요")
+            backed_up = False
+            _write_status(toVersion=release["version"])
+            step("done", f"v{release['version']}(으)로 업데이트했어요")
             return 0
-        except Exception as exc:
-            log.write(f"오류: {exc}\n")
-            step("failed", str(exc))
+        except BaseException as exc:  # 시간 초과·중단 포함: 적용을 시작했다면 반드시 되돌린다
+            detail = "시간이 너무 오래 걸려 중단했어요" if isinstance(exc, subprocess.TimeoutExpired) else str(exc) or exc.__class__.__name__
+            log.write(f"오류: {detail}\n")
+            if backed_up:
+                _restore_deployed(backup, log)
+                step("failed", f"업데이트를 적용하지 못해 이전 버전으로 되돌렸어요: {detail}")
+            else:
+                step("failed", detail)
+            if not isinstance(exc, Exception):
+                raise
             return 1
         finally:
             shutil.rmtree(stage, ignore_errors=True)
@@ -1298,10 +1392,7 @@ ROUTES: dict[tuple[str, str], Any] = {
 
 def cli(args: list[str]) -> int:
     """설치 스크립트·systemd용:
-    firewall on|off|status | touch-conf <방향> | bundle-hash <폴더> | update"""
-    if len(args) == 2 and args[0] == "bundle-hash":
-        print(bundle_hash_of_dir(args[1]))
-        return 0
+    firewall on|off|status | touch-conf <방향> | update"""
     if args == ["update"]:
         return run_update()
     if len(args) == 2 and args[0] == "touch-conf" and args[1] in ROTATIONS:
@@ -1311,7 +1402,7 @@ def cli(args: list[str]) -> int:
         result = security_status() if args[1] == "status" else set_firewall(args[1] == "on")
         print(json.dumps(result, ensure_ascii=False))
         return 0
-    print("usage: miraepass-kiosk-control.py firewall on|off|status | touch-conf <방향> | bundle-hash <폴더> | update", file=sys.stderr)
+    print("usage: miraepass-kiosk-control.py firewall on|off|status | touch-conf <방향> | update", file=sys.stderr)
     return 2
 
 

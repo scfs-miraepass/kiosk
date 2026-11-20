@@ -26,6 +26,7 @@
 #   AUTO_UPDATE     1이면 매일 새벽 자동 업데이트 (기본: 1). 관리자 모드 › 업데이트에서 켜고 끌 수 있다.
 #   CHROMIUM_EXTRA_FLAGS  Chromium 추가 플래그 (기본: 라즈베리파이는 GPU 래스터화 플래그, 그 외 없음)
 #   KIOSK_VERSION   관리자 모드에 표시할 버전 (기본: 저장소 package.json 버전 + git 커밋)
+#   UPDATE_REPO     업데이트를 받을 GitHub 저장소 owner/repo (기본: 저장소 git remote, 없으면 scfs-miraepass/kiosk)
 #   SKIP_PACKAGES   1이면 패키지 설치를 건너뛴다 (지원하지 않는 배포판용)
 #   NM_TAKEOVER     1이면 NetworkManager가 아닌 네트워크 관리자(dhcpcd·netplan·ifupdown 등)를
 #                   다음 부팅부터 NetworkManager로 바꾼다. 지금 연결된 SSH는 끊지 않는다.
@@ -405,10 +406,15 @@ SCREEN_FILES=(
   /usr/local/bin/miraepass-kiosk-session
   /usr/local/bin/miraepass-kiosk-rotate
   /etc/systemd/system/miraepass-kiosk.service
-  /etc/default/miraepass-kiosk
   /etc/chromium/policies/managed/miraepass-kiosk.json
 )
-screen_digest() { cat "${SCREEN_FILES[@]}" 2>/dev/null | sha256sum | cut -d' ' -f1; }
+# 설정 파일은 줄 순서와 무관하게 내용만 비교한다 (관리자 모드에서 화면 방향을 바꾸면 줄 위치가 바뀔 수 있음)
+screen_digest() {
+  { cat "${SCREEN_FILES[@]}" 2>/dev/null; grep -v -E '^\s*(#|$)' /etc/default/miraepass-kiosk 2>/dev/null | sort; } | sha256sum | cut -d' ' -f1
+}
+# 이 기능이 생기기 전에 설치된 기기는 업데이트 타이머가 없다. 새로 생기면 켜 준다.
+UPDATE_TIMER_EXISTED=0
+[[ -e /etc/systemd/system/miraepass-kiosk-update.timer ]] && UPDATE_TIMER_EXISTED=1
 SCREEN_BEFORE="$(screen_digest)"
 
 fi
@@ -429,8 +435,19 @@ if [[ -z "${KIOSK_VERSION:-}" && -f "${REPO_DIR}/package.json" ]]; then
   fi
 fi
 KIOSK_VERSION="${KIOSK_VERSION:-unknown}"
-# 설치한 스크립트 묶음의 내용 해시 (서버 묶음과 비교해 업데이트 여부를 판단). 업데이트 실행기는 받은 해시를 넘겨준다.
-KIOSK_BUNDLE_HASH="${KIOSK_BUNDLE_HASH:-$(python3 "${SCRIPT_DIR}/miraepass-kiosk-control.py" bundle-hash "${SCRIPT_DIR}")}"
+# 업데이트를 받을 GitHub 저장소 (owner/repo). 업데이트 때는 기존 값을 유지하고,
+# 처음 설치 때는 UPDATE_REPO → 저장소 git remote → 기본값 순으로 정한다.
+if [[ "${MODE}" == "update" ]]; then
+  UPDATE_REPO="${UPDATE_REPO:-$(sed -n 's/^MIRAEPASS_KIOSK_UPDATE_REPO=//p' /etc/default/miraepass-kiosk-control 2>/dev/null | head -n1)}"
+fi
+if [[ -z "${UPDATE_REPO:-}" ]] && command -v git >/dev/null 2>&1; then
+  REMOTE="$(git -c safe.directory='*' -C "${REPO_DIR}" remote get-url origin 2>/dev/null || true)"
+  if [[ "${REMOTE}" =~ github\.com[:/]([^/]+/[^/]+)$ ]]; then
+    UPDATE_REPO="${BASH_REMATCH[1]%.git}"
+  fi
+fi
+UPDATE_REPO="${UPDATE_REPO:-scfs-miraepass/kiosk}"
+[[ "${UPDATE_REPO}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "UPDATE_REPO는 owner/repo 형식이어야 합니다: ${UPDATE_REPO}"
 
 # 클라우드 페이지 → 127.0.0.1 로컬 서비스 호출을 Chromium 정책으로 허용할 origin
 CLOUD_ORIGIN="$(python3 -c 'import sys,urllib.parse as u; p=u.urlsplit(sys.argv[1]); print(f"{p.scheme}://{p.netloc}")' "${CLOUD_URL}")"
@@ -470,14 +487,14 @@ install -m 0755 "${SCRIPT_DIR}/uninstall.sh" /usr/local/sbin/miraepass-kiosk-uni
 mkdir -p /etc/default
 # 사용자가 직접 추가한 줄(예: MIRAEPASS_KIOSK_ALLOWED_ORIGINS)은 업데이트해도 남긴다
 keep_extra() { grep -v -E "^($2)=" "$1" 2>/dev/null | grep -v -E '^\s*(#|$)' || true; }
-EXTRA_CONTROL_ENV="$(keep_extra /etc/default/miraepass-kiosk-control 'MIRAEPASS_KIOSK_(ADMIN_PIN|ALLOW_POWER|URL|VERSION|BUNDLE_HASH|USER|ENV_FILE|ROTATE_BIN)')"
+EXTRA_CONTROL_ENV="$(keep_extra /etc/default/miraepass-kiosk-control 'MIRAEPASS_KIOSK_(ADMIN_PIN|ALLOW_POWER|URL|VERSION|UPDATE_REPO|USER|ENV_FILE|ROTATE_BIN)')"
 EXTRA_KIOSK_ENV="$(keep_extra /etc/default/miraepass-kiosk 'KIOSK_URL|DISPLAY_ROTATE|CHROMIUM_EXTRA_FLAGS')"
 cat >/etc/default/miraepass-kiosk-control <<DEFAULT
 MIRAEPASS_KIOSK_ADMIN_PIN=${ADMIN_PIN}
 MIRAEPASS_KIOSK_ALLOW_POWER=1
 MIRAEPASS_KIOSK_URL=${CLOUD_URL}
 MIRAEPASS_KIOSK_VERSION=${KIOSK_VERSION}
-MIRAEPASS_KIOSK_BUNDLE_HASH=${KIOSK_BUNDLE_HASH}
+MIRAEPASS_KIOSK_UPDATE_REPO=${UPDATE_REPO}
 MIRAEPASS_KIOSK_USER=${KIOSK_USER}
 MIRAEPASS_KIOSK_ENV_FILE=/etc/default/miraepass-kiosk
 MIRAEPASS_KIOSK_ROTATE_BIN=/usr/local/bin/miraepass-kiosk-rotate
@@ -739,7 +756,10 @@ else
   if systemctl is-enabled --quiet miraepass-firewall.service 2>/dev/null; then
     "${PYTHON_BIN}" /usr/local/bin/miraepass-kiosk-control.py firewall on >/dev/null || warn "방화벽 규칙을 다시 만들지 못했습니다"
   fi
-  # 자동 업데이트 켜짐/꺼짐은 사용자가 정한 대로 둔다
+  # 자동 업데이트 켜짐/꺼짐은 사용자가 정한 대로 둔다. 타이머가 이번에 처음 생긴 기기만 기본값(켜짐)으로.
+  if [[ "${UPDATE_TIMER_EXISTED}" == "0" && "${AUTO_UPDATE:-1}" == "1" ]]; then
+    systemctl enable --now miraepass-kiosk-update.timer >/dev/null && echo "==> 자동 업데이트 켬 (매일 새벽 3:30 전후)"
+  fi
   if [[ "$(screen_digest)" != "${SCREEN_BEFORE}" ]] && systemctl is-active --quiet miraepass-kiosk.service; then
     echo "==> 화면 관련 파일이 바뀌어 키오스크 화면을 다시 시작합니다"
     systemctl restart miraepass-kiosk.service || warn "키오스크 화면을 다시 시작하지 못했습니다"
