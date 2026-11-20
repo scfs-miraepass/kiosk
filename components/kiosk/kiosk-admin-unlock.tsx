@@ -3,9 +3,8 @@
 import { LockKeyhole, X } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { PI_CONTROL_URL } from "./admin/local-api";
 import { NumericKeypad } from "./numeric-keypad";
-
-const PI_CONTROL_URL = "http://127.0.0.1:8765";
 
 export function KioskAdminUnlock({ onUnlocked, onCancel }: { onUnlocked: () => void; onCancel: () => void }) {
   const [pin, setPin] = useState("");
@@ -21,13 +20,20 @@ export function KioskAdminUnlock({ onUnlocked, onCancel }: { onUnlocked: () => v
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pin: nextPin }),
+        signal: AbortSignal.timeout(8000),
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.success) throw new Error(json?.message ?? "PIN을 확인할 수 없어요");
       onUnlocked();
     } catch (e) {
       setPin("");
-      setError(e instanceof Error ? e.message : "PIN 확인에 실패했어요");
+      setError(
+        e instanceof TypeError || (e instanceof DOMException && e.name === "TimeoutError")
+          ? "라즈베리파이 로컬 서비스에 연결할 수 없어요"
+          : e instanceof Error
+            ? e.message
+            : "PIN 확인에 실패했어요",
+      );
     } finally {
       setLoading(false);
     }
@@ -47,7 +53,7 @@ export function KioskAdminUnlock({ onUnlocked, onCancel }: { onUnlocked: () => v
               <LockKeyhole className="size-7" />
             </div>
             <h2 className="text-2xl font-extrabold">관리자 PIN</h2>
-            <p className="text-sm text-muted-foreground">네트워크·터미널 설정은 관리자 확인 후 사용할 수 있어요.</p>
+            <p className="text-sm text-muted-foreground">네트워크·전원 설정은 관리자 확인 후 사용할 수 있어요.</p>
           </div>
           <Button type="button" variant="ghost" size="icon" className="rounded-full" onClick={onCancel} disabled={loading} aria-label="닫기">
             <X className="size-6" />

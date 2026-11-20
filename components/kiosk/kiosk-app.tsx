@@ -27,10 +27,9 @@ import { IdentifyScreen } from "./identify-screen";
 import { KioskAdminUnlock } from "./kiosk-admin-unlock";
 import { KioskSetup } from "./kiosk-setup";
 import { MenuScreen } from "./menu-screen";
-import { PiControlPanel, type PiControlFocusTarget } from "./pi-control-panel";
+import { PiControlPanel } from "./pi-control-panel";
 import { PinScreen } from "./pin-screen";
 import { ReviewScreen } from "./review-screen";
-import { TouchKeyboard } from "./touch-keyboard";
 
 /** 입력 중인 단계: 이때만 무입력 타이머로 대기화면 복귀 */
 const INTERACTIVE: KioskStep[] = ["menu", "review", "identify", "pin", "error"];
@@ -80,8 +79,6 @@ export function KioskApp() {
   return <KioskFlow token={token} />;
 }
 
-type AdminFocusTarget = PiControlFocusTarget;
-
 function KioskFlow({ token }: { token: string }) {
   const qc = useQueryClient();
   const [step, setStep] = useAtom(stepAtom);
@@ -96,8 +93,6 @@ function KioskFlow({ token }: { token: string }) {
   const setTokenSetup = useSetAtom(tokenSetupAtom);
   const [adminUnlockOpen, setAdminUnlockOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
-  const [keyboardOpen, setKeyboardOpen] = useState(false);
-  const [focusTarget, setFocusTarget] = useState<AdminFocusTarget>("adminToken");
   // 직원용 숨은 동작: 로고(영업 종료 화면은 달 아이콘)를 5초 동안 누르면 관리자 PIN 확인
   const openAdminUnlock = useCallback(() => setAdminUnlockOpen(true), []);
 
@@ -136,24 +131,9 @@ function KioskFlow({ token }: { token: string }) {
   const kiosk = settings.data?.kiosk ?? { idleSeconds: 60, doneSeconds: 10, shufflePinPad: true };
   const goHome = useCallback(() => reset("attract"), [reset]);
   const finish = useCallback(() => reset("attract"), [reset]);
-  const focusAdminInput = useCallback((target: AdminFocusTarget) => {
-    setFocusTarget(target);
-    setKeyboardOpen(true);
-  }, []);
-  const adminKeyboardEvent = (detail: { target: AdminFocusTarget; value?: string; backspace?: boolean }) => {
-    window.dispatchEvent(new CustomEvent("mp-cafe:kiosk-keyboard", { detail }));
-  };
-  const targetLabel: Record<AdminFocusTarget, string> = {
-    adminToken: "키오스크 토큰",
-    ssid: "Wi‑Fi 이름",
-    wifiIdentity: "Enterprise ID",
-    wifiPassword: "Wi‑Fi 비밀번호",
-    ethernetAddress: "유선 IP/CIDR",
-    ethernetGateway: "유선 게이트웨이",
-    ethernetDns: "유선 DNS",
-  };
 
-  useIdleTimer(kiosk.idleSeconds, goHome, INTERACTIVE.includes(step) && !paying);
+  // 관리자 모드가 열려 있는 동안은 손님용 무입력 타이머를 멈춘다 (관리자 모드는 자체 타이머로 닫힘)
+  useIdleTimer(kiosk.idleSeconds, goHome, INTERACTIVE.includes(step) && !paying && !adminOpen && !adminUnlockOpen);
 
   const closed = status.data && !status.data.open;
   useEffect(() => {
@@ -183,30 +163,16 @@ function KioskFlow({ token }: { token: string }) {
         />
       )}
       {adminOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-5">
-          <PiControlPanel
-            onFocusTarget={focusAdminInput}
-            onInputBlur={() => setKeyboardOpen(false)}
-            onClose={() => {
-              setAdminOpen(false);
-              setKeyboardOpen(false);
-              reset("attract");
-            }}
-            onTokenRegistered={(next) => {
-              setToken(next);
-              setTokenSetup(null);
-              reset("attract");
-            }}
-          />
-        </div>
-      )}
-      {adminOpen && keyboardOpen && (
-        <TouchKeyboard
-          onInput={(value) => adminKeyboardEvent({ target: focusTarget, value })}
-          onBackspace={() => adminKeyboardEvent({ target: focusTarget, backspace: true })}
-          onEnter={() => setKeyboardOpen(false)}
-          onClose={() => setKeyboardOpen(false)}
-          targetLabel={targetLabel[focusTarget]}
+        <PiControlPanel
+          onClose={() => {
+            setAdminOpen(false);
+            reset("attract");
+          }}
+          onTokenRegistered={(next) => {
+            setToken(next);
+            setTokenSetup(null);
+            reset("attract");
+          }}
         />
       )}
     </>

@@ -61,6 +61,9 @@ export function TouchKeyboard({ onInput, onBackspace, onEnter, onClose, targetLa
 
   return (
     <div
+      data-touch-keyboard
+      // 키보드를 눌러도 입력칸 포커스가 빠지지 않게 한다
+      onMouseDown={(e) => e.preventDefault()}
       className="fixed z-[60] select-none rounded-[1.5rem] border border-white/10 bg-slate-950 p-3 shadow-2xl shadow-slate-900/35"
       style={{ left: current.x, top: current.y, width: KEYBOARD_WIDTH }}
     >
@@ -135,6 +138,7 @@ function Key({
         action && "bg-blue-600 text-white shadow-lg shadow-blue-600/30",
         !active && !action && "bg-white text-slate-950 shadow-sm shadow-black/20 hover:bg-blue-50",
       )}
+      tabIndex={-1}
       onPointerDown={(e) => e.preventDefault()}
       onClick={onClick}
       disabled={disabled}
