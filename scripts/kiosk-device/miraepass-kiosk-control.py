@@ -186,7 +186,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps({"success": False, "code": code, "message": message}, ensure_ascii=False).encode("utf-8"))
 
     def launch_page(self) -> None:
-        body = LAUNCH_PAGE.replace("__KIOSK_URL__", json.dumps(KIOSK_URL).replace("<", "\\u003c")).encode("utf-8")
+        body = launch_html().replace("__KIOSK_URL__", json.dumps(KIOSK_URL).replace("<", "\\u003c")).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -194,47 +194,28 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-# 클라우드 키오스크 주소에 닿을 때까지 기다렸다가 이동하는 로컬 시작 화면.
-# 외부 리소스·애니메이션 없이 단색으로만 그린다 (Pi GPU 부담 최소화).
-LAUNCH_PAGE = """<!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MIRAEPASS 키오스크</title>
-<style>
-html,body{margin:0;height:100%;background:#f1f5f9;color:#0f172a;font-family:"Noto Sans CJK KR","Noto Sans KR",sans-serif}
-main{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center;padding:24px;box-sizing:border-box}
-h1{margin:0;font-size:28px}p{margin:0;color:#475569;font-size:18px;line-height:1.5}
-small{color:#94a3b8;font-size:14px}
-</style></head>
-<body><main>
-<h1>키오스크를 시작하고 있어요</h1>
-<p id="msg">서버에 연결하는 중…</p>
-<small id="detail"></small>
-</main>
-<script>
-const url = __KIOSK_URL__;
-const msg = document.getElementById("msg");
-const detail = document.getElementById("detail");
-let tries = 0;
-async function check() {
-  if (!url) { msg.textContent = "키오스크 주소가 설정되지 않았어요. 설치 스크립트를 다시 실행해 주세요."; return; }
-  tries += 1;
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
-    await fetch(url, { mode: "no-cors", cache: "no-store", signal: ctrl.signal });
-    clearTimeout(timer);
-    location.replace(url);
-    return;
-  } catch (e) {
-    msg.textContent = tries < 3 ? "서버에 연결하는 중…" : "네트워크에 연결되지 않았어요. 케이블 또는 Wi‑Fi를 확인해 주세요.";
-    detail.textContent = "자동으로 다시 시도합니다 (" + tries + "회)";
-  }
-  setTimeout(check, 5000);
-}
-check();
-</script>
-</body></html>
+# 로컬 시작 화면 (launch.html): 서버 연결을 기다렸다가 이동하고, 인터넷이 없어도 네트워크를 설정할 수 있다.
+LAUNCH_FILES = (
+    os.environ.get("MIRAEPASS_KIOSK_LAUNCH_FILE", "/usr/local/share/miraepass-kiosk/launch.html"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "launch.html"),  # 저장소에서 바로 실행할 때
+)
+# launch.html이 없을 때만 쓰는 최소 화면
+LAUNCH_FALLBACK = """<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>MIRAEPASS 키오스크</title></head>
+<body style="font-family:sans-serif;text-align:center;padding-top:20vh"><h1>키오스크를 시작하고 있어요</h1>
+<p id="m">서버에 연결하는 중…</p><script>const url=__KIOSK_URL__;
+(async function c(){try{await fetch(url,{mode:"no-cors",cache:"no-store"});location.replace(url)}catch(e){
+document.getElementById("m").textContent="네트워크에 연결되지 않았어요";setTimeout(c,5000)}})()</script></body></html>
 """
+
+
+def launch_html() -> str:
+    for path in LAUNCH_FILES:
+        try:
+            with open(path, encoding="utf-8") as f:
+                return f.read()
+        except OSError:
+            continue
+    return LAUNCH_FALLBACK
 
 
 # ───────────────────────── 네트워크 상태 ─────────────────────────

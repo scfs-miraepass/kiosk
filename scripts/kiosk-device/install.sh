@@ -31,10 +31,12 @@ if [[ "${EUID}" -ne 0 ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ ! -f "${SCRIPT_DIR}/miraepass-kiosk-control.py" ]]; then
-  echo "${SCRIPT_DIR}/miraepass-kiosk-control.py 가 없습니다. scripts/kiosk-device 폴더를 통째로 복사해 주세요." >&2
-  exit 1
-fi
+for f in miraepass-kiosk-control.py launch.html; do
+  if [[ ! -f "${SCRIPT_DIR}/${f}" ]]; then
+    echo "${SCRIPT_DIR}/${f} 가 없습니다. scripts/kiosk-device 폴더를 통째로 복사해 주세요." >&2
+    exit 1
+  fi
+done
 
 die() {
   echo "오류: $*" >&2
@@ -358,6 +360,9 @@ if [[ -e /etc/systemd/system/miraepass-pi-control.service ]]; then
 fi
 
 install -m 0755 "${SCRIPT_DIR}/miraepass-kiosk-control.py" /usr/local/bin/miraepass-kiosk-control.py
+# 로컬 시작 화면: 인터넷이 없어도 이 화면에서 유선/Wi‑Fi를 설정할 수 있다
+install -d /usr/local/share/miraepass-kiosk
+install -m 0644 "${SCRIPT_DIR}/launch.html" /usr/local/share/miraepass-kiosk/launch.html
 mkdir -p /etc/default
 cat >/etc/default/miraepass-kiosk-control <<DEFAULT
 MIRAEPASS_KIOSK_ADMIN_PIN=${ADMIN_PIN}
