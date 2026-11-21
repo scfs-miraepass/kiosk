@@ -44,7 +44,8 @@ export function IdentifyScreen({ onHome }: { onHome: () => void }) {
       if (c.sufficient === false) return setInsufficient(c);
       setCustomer(c);
       setKey(newIdempotencyKey());
-      setStep("pin");
+      // 결제 비밀번호가 아직 없으면 먼저 만들고 바로 결제한다
+      setStep(c.needsPinSetup ? "pin-setup" : "pin");
     },
   });
 

@@ -29,10 +29,11 @@ import { KioskSetup } from "./kiosk-setup";
 import { MenuScreen } from "./menu-screen";
 import { KioskAdminPanel } from "./admin/admin-panel";
 import { PinScreen } from "./pin-screen";
+import { PinSetupScreen } from "./pin-setup-screen";
 import { ReviewScreen } from "./review-screen";
 
 /** 입력 중인 단계: 이때만 무입력 타이머로 대기화면 복귀 */
-const INTERACTIVE: KioskStep[] = ["menu", "review", "identify", "pin", "error"];
+const INTERACTIVE: KioskStep[] = ["menu", "review", "identify", "pin", "pin-setup", "error"];
 /** 결제 완료 화면은 영업 종료 화면으로 끊지 않는다 (결제 진행 중은 paymentPendingAtom으로 판단) */
 const UNINTERRUPTIBLE: KioskStep[] = ["done"];
 
@@ -194,6 +195,7 @@ function KioskFlow({ token }: { token: string }) {
       {step === "review" && <ReviewScreen onHome={goHome} />}
       {step === "identify" && <IdentifyScreen onHome={goHome} />}
       {step === "pin" && <PinScreen shuffle={kiosk.shufflePinPad} onHome={goHome} />}
+      {step === "pin-setup" && <PinSetupScreen shuffle={kiosk.shufflePinPad} onHome={goHome} />}
       {step === "done" && <DoneScreen seconds={kiosk.doneSeconds} onFinish={finish} />}
       {step === "error" && <ErrorScreen onHome={goHome} />}
       {adminLayer}

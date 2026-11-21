@@ -318,6 +318,8 @@ async function checkPin(customerId: number, pin: string) {
   throw new ApiError("INVALID_PIN", `비밀번호가 맞지 않아요 (${remaining}번 더 시도할 수 있어요)`, 401, { remainingAttempts: remaining });
 }
 
+export const NOT_REGISTERED_MESSAGE = "MIRAEPASS에 가입되어 있지 않아 이용할 수 없어요. MIRAEPASS 앱에서 먼저 로그인해 주세요";
+
 export function mapMiraepassError(e: unknown): ApiError {
   if (e instanceof ApiError) return e;
   if (e instanceof MiraepassError) {
@@ -336,6 +338,10 @@ export function mapMiraepassError(e: unknown): ApiError {
         return new ApiError("PAYMENT_UNAVAILABLE", "키오스크 결제 계정의 권한 설정이 필요해요. 카페 관리자에게 알려 주세요", 503);
       case "PIN_NOT_SET":
         return new ApiError("PIN_NOT_SET", "키오스크 비밀번호가 설정되지 않았어요. MIRAEPASS에서 먼저 설정해 주세요", 409);
+      case "NOT_REGISTERED":
+        return new ApiError("NOT_REGISTERED", NOT_REGISTERED_MESSAGE, 409);
+      case "PIN_ALREADY_SET":
+        return new ApiError("PIN_ALREADY_SET", "결제 비밀번호가 이미 설정되어 있어요", 409);
       default:
         console.error("[miraepass]", e.code, e.status, e.message);
         return new ApiError("PAYMENT_UNAVAILABLE", FAIL_MESSAGES.PAYMENT_UNAVAILABLE!, 503);

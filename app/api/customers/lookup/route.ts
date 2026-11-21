@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ApiError, handler, ok, parseBody, rateLimit, requireKiosk } from "@/lib/api";
 import { CartItemsBody } from "@/lib/cart-schema";
 import { maskName } from "@/lib/format";
+import { pinReadiness } from "@/lib/kiosk-pin";
 import { getMenuMap } from "@/lib/menu";
 import { miraepass } from "@/lib/miraepass";
 import { mapMiraepassError } from "@/lib/orders";
@@ -42,6 +43,9 @@ export const POST = handler(async (req) => {
   }
   if (!user || user.type === "service") throw new ApiError("USER_NOT_FOUND", "해당 ID의 사용자를 찾을 수 없어요", 404);
 
+  // 결제 비밀번호가 없으면 6자리를 다 입력한 뒤가 아니라 여기서 미리 알려 준다 (미가입·설정 불가는 예외)
+  const readiness = await pinReadiness(user.id);
+
   const candidate: CustomerCandidate = {
     id: user.id,
     type: user.type,
@@ -50,6 +54,7 @@ export const POST = handler(async (req) => {
     grade: user.grade,
     classNo: user.classNo,
     sufficient: user.point === null || total === null ? null : user.point >= total,
+    needsPinSetup: readiness === "setup",
   };
   return ok(candidate);
 });

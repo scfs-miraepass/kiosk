@@ -4,9 +4,9 @@ import { MiraepassError, type MiraepassGateway, type MPUser } from "./types";
 /**
  * MIRAEPASS_MOCK=1 일 때 쓰는 인메모리 구현. 서버를 다시 시작하면 초기화된다.
  * ID 규칙: 학생은 학번 4자리(3학년 4반 12번 → 3412), 교사는 고유 4자리.
- * 키오스크 비밀번호는 모두 123456 (3105만 미설정).
+ * 키오스크 비밀번호는 모두 123456. 3105는 미설정(키오스크에서 만들 수 있음), 3106은 MIRAEPASS 미가입.
  */
-type MockUser = MPUser & { password?: string; kioskPin?: string };
+type MockUser = MPUser & { password?: string; kioskPin?: string; /** MIRAEPASS에 가입하지 않음 (계정 비밀번호 없음) */ unregistered?: boolean };
 
 const PIN = "123456";
 
@@ -17,6 +17,7 @@ const seed: MockUser[] = [
   { id: 3412, type: "student", name: "최코딩", grade: 3, classNo: 4, point: 12000, kioskPin: PIN },
   { id: 3101, type: "student", name: "정잔액", grade: 3, classNo: 1, point: 0, kioskPin: PIN },
   { id: 3105, type: "student", name: "한미설", grade: 3, classNo: 1, point: 5000 },
+  { id: 3106, type: "student", name: "노가입", grade: 3, classNo: 1, point: 5000, unregistered: true },
   { id: 4001, type: "teacher", name: "홍길동", grade: null, classNo: null, point: 20000, password: "1234", kioskPin: PIN },
   { id: 4002, type: "teacher", name: "김선생", grade: null, classNo: null, point: 9000, password: "1234", kioskPin: PIN },
   { id: 4003, type: "teacher", name: "김하늘", grade: null, classNo: null, point: 15000, kioskPin: PIN },
@@ -36,7 +37,7 @@ const users = (globalThis.__mpMockUsers ??= new Map(seed.map((u) => [u.id, { ...
 /** 실제 네트워크처럼 지연을 준다. 테스트에서는 MIRAEPASS_MOCK_LATENCY=0으로 끈다 */
 const latency = () =>
   process.env.MIRAEPASS_MOCK_LATENCY === "0" ? Promise.resolve() : new Promise((r) => setTimeout(r, 150 + Math.random() * 250));
-const strip = ({ password: _password, kioskPin: _pin, ...u }: MockUser): MPUser => ({ ...u });
+const strip = ({ password: _password, kioskPin: _pin, unregistered: _unregistered, ...u }: MockUser): MPUser => ({ ...u });
 
 export const mockGateway: MiraepassGateway = {
   async findUser(id) {
@@ -57,6 +58,21 @@ export const mockGateway: MiraepassGateway = {
     if (!u) throw new MiraepassError("USER_NOT_FOUND", "사용자를 찾을 수 없어요", 404);
     if (!u.kioskPin) throw new MiraepassError("PIN_NOT_SET", "키오스크 비밀번호가 설정되지 않았어요", 400);
     return u.kioskPin === pin;
+  },
+  async kioskPinStatus(id) {
+    await latency();
+    const u = users.get(id);
+    if (!u) throw new MiraepassError("USER_NOT_FOUND", "사용자를 찾을 수 없어요", 404);
+    return u.kioskPin ? "ready" : u.unregistered ? "unregistered" : "unset";
+  },
+  canSetKioskPin: true,
+  async setInitialKioskPin(id, pin) {
+    await latency();
+    const u = users.get(id);
+    if (!u) throw new MiraepassError("USER_NOT_FOUND", "사용자를 찾을 수 없어요", 404);
+    if (u.unregistered) throw new MiraepassError("NOT_REGISTERED", "MIRAEPASS에 가입하지 않은 사용자예요", 400);
+    if (u.kioskPin) throw new MiraepassError("PIN_ALREADY_SET", "키오스크 비밀번호가 이미 설정되어 있어요", 400);
+    u.kioskPin = pin;
   },
   async deduct(userId, amount) {
     await latency();

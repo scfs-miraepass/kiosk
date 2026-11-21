@@ -12,6 +12,7 @@ type Mode = "ok" | "hang" | "500" | "400";
 let mode: Mode = "ok";
 let deductCalls = 0;
 let searchUrl: URL | null = null;
+let initBody: { id: number; password: string } | null = null;
 let server: Server;
 
 const json = (res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) => {
@@ -35,6 +36,32 @@ beforeAll(async () => {
       if (mode === "500") return json(res, 500, { success: false, message: "boom" });
       if (mode === "400") return json(res, 400, { success: false, message: "포인트 부족" });
       return json(res, 200, { success: true, data: 4200 });
+    }
+    // 3105: 가입했지만 결제 비밀번호 없음, 3106: 미가입, 1999: 없는 사용자, 그 외: 결제 비밀번호 123456
+    if (req.url === "/auth/kiosk") {
+      let raw = "";
+      req.on("data", (chunk) => (raw += chunk));
+      req.on("end", () => {
+        const { id, password } = JSON.parse(raw) as { id: number; password: string };
+        if (id === 3105 || id === 3106) return json(res, 400, { success: false, message: "No password has been set" });
+        if (id === 1999) return json(res, 404, { success: false, message: "User not found" });
+        json(res, 200, { success: true, data: password === "123456" });
+      });
+      return;
+    }
+    if (req.url === "/auth/kiosk/init") {
+      let raw = "";
+      req.on("data", (chunk) => (raw += chunk));
+      req.on("end", () => {
+        initBody = JSON.parse(raw) as { id: number; password: string };
+        if (initBody.id === 3105) return void res.writeHead(204).end();
+        if (initBody.id === 3106) return json(res, 400, { success: false, message: "Password has not been set" });
+        if (initBody.id === 1999) return json(res, 404, { success: false, message: "User not found" });
+        json(res, 409, { success: false, message: "Kiosk password already set" });
+      });
+      return;
+    }    if (req.url?.startsWith("/auth/password/exists/")) {
+      return json(res, 200, { success: true, data: Number(req.url.split("/").pop()) !== 3106 });
     }
     if (req.url?.startsWith("/search?")) {
       searchUrl = new URL(req.url, "http://local");
@@ -108,5 +135,32 @@ describe("realGateway.searchTeachers", () => {
       [4001, "홍길동"],
       [4002, "김선생"],
     ]);
+  });
+});
+
+describe("realGateway 결제 비밀번호 상태", () => {
+  it("결제 비밀번호 일치 여부를 돌려주고, 설정하지 않았으면 PIN_NOT_SET이다", async () => {
+    await expect(realGateway.verifyKioskPin(1101, "123456")).resolves.toBe(true);
+    await expect(realGateway.verifyKioskPin(1101, "000000")).resolves.toBe(false);
+    await expect(realGateway.verifyKioskPin(3105, "123456")).rejects.toMatchObject({ code: "PIN_NOT_SET" });
+  });
+
+  it("결제 비밀번호가 있으면 ready, 없으면 가입 여부로 unset·unregistered를 구분한다", async () => {
+    await expect(realGateway.kioskPinStatus(1101)).resolves.toBe("ready");
+    await expect(realGateway.kioskPinStatus(3105)).resolves.toBe("unset");
+    await expect(realGateway.kioskPinStatus(3106)).resolves.toBe("unregistered");
+    await expect(realGateway.kioskPinStatus(1999)).rejects.toMatchObject({ code: "USER_NOT_FOUND" });
+  });
+
+  it("결제 비밀번호가 없는 가입자의 비밀번호를 처음 한 번 설정한다", async () => {
+    expect(realGateway.canSetKioskPin).toBe(true);
+    await expect(realGateway.setInitialKioskPin(3105, "246810")).resolves.toBeUndefined();
+    expect(initBody).toEqual({ id: 3105, password: "246810" });
+  });
+
+  it("이미 있으면 PIN_ALREADY_SET, 미가입이면 NOT_REGISTERED, 없는 사용자면 USER_NOT_FOUND다", async () => {
+    await expect(realGateway.setInitialKioskPin(1101, "246810")).rejects.toMatchObject({ code: "PIN_ALREADY_SET" });
+    await expect(realGateway.setInitialKioskPin(3106, "246810")).rejects.toMatchObject({ code: "NOT_REGISTERED" });
+    await expect(realGateway.setInitialKioskPin(1999, "246810")).rejects.toMatchObject({ code: "USER_NOT_FOUND" });
   });
 });
