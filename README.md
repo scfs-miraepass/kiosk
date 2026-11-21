@@ -63,6 +63,16 @@ yarn start               # NODE_ENV=production, PORT 기본 3000
 - `data/` 폴더(DB, 업로드한 메뉴 이미지)는 꼭 백업하세요.
 - 로그인 쿠키의 `Secure`는 HTTPS로 접속했을 때만 자동으로 붙습니다(리버스 프록시의 `X-Forwarded-Proto` 포함). 그래서 `http://서버IP` 로 접속하는 태블릿에서도 로그인이 유지됩니다.
 
+### 직원 화면 앱 설치 (PWA)
+
+직원 화면(`/staff`)은 홈 화면 앱으로 설치해 주소창 없이 쓸 수 있습니다.
+
+- **Android·PC (Chrome·Edge·삼성 인터넷)**: `/staff`에 로그인한 뒤 상단 바의 **앱 설치** 버튼을 누르거나, 브라우저 메뉴에서 **앱 설치**를 누릅니다.
+- **iPhone·iPad (Safari)**: 공유 버튼 → **홈 화면에 추가**. 앱은 Safari와 로그인 상태를 따로 가지므로 처음 열 때 한 번 더 로그인합니다.
+- 설치하려면 **HTTPS**로 접속해야 합니다(`localhost` 제외). `http://서버IP`로 접속하면 서비스 워커가 동작하지 않아 Android에서는 브라우저로 열리는 바로가기로만 추가됩니다.
+- 구성 파일은 `public/staff.webmanifest`(scope `/staff`), `public/staff-sw.js`, `public/staff-offline.html`, `public/icons/`입니다. 모두 `public`에 있어 로그인 검사(`proxy.ts`)를 거치지 않습니다.
+- 서비스 워커는 화면과 API를 캐시하지 않습니다(주문은 실시간이어야 하므로). 서버에 닿지 않을 때만 오프라인 안내 화면을 보여 줍니다. 안내 화면을 바꾸면 `staff-sw.js`의 `CACHE` 버전을 올립니다.
+
 ### 라즈베리파이 키오스크 (Raspberry Pi 4B + Chromium)
 
 키오스크 화면은 라즈베리파이 4B에서도 끊기지 않도록 다음 원칙으로 만들었습니다(`components/kiosk`).
