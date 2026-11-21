@@ -3,7 +3,7 @@ import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
-  const tmp = process.env.TMPDIR ?? "/tmp";
+  const tmp = process.env.TMPDIR ?? process.env.TEMP ?? "/tmp";
   process.env.DATABASE_PATH = `${tmp}/cafe-lookup-${process.pid}-${Date.now()}/cafe.db`;
   process.env.MIRAEPASS_MOCK = "1";
   process.env.MIRAEPASS_MOCK_LATENCY = "0";
@@ -22,7 +22,11 @@ beforeAll(() => {
   latte = db.insert(schema.menuItems).values({ categoryId: cat.id, name: "라떼", price: 2000 }).returning().get().id;
 });
 beforeEach(() => resetRateLimit());
-afterAll(() => fs.rmSync(path.dirname(process.env.DATABASE_PATH!), { recursive: true, force: true }));
+afterAll(() => {
+  // Windows는 열려 있는 DB 파일을 지울 수 없다
+  db.$client.close();
+  fs.rmSync(path.dirname(process.env.DATABASE_PATH!), { recursive: true, force: true });
+});
 
 const lookup = async (body: unknown) => {
   const req = new Request("http://local/api/customers/lookup", {
