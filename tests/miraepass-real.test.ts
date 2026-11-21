@@ -36,6 +36,21 @@ beforeAll(async () => {
       if (mode === "400") return json(res, 400, { success: false, message: "포인트 부족" });
       return json(res, 200, { success: true, data: 4200 });
     }
+    // 3105: 가입했지만 결제 비밀번호 없음, 3106: 미가입, 1999: 없는 사용자, 그 외: 결제 비밀번호 123456
+    if (req.url === "/auth/kiosk") {
+      let raw = "";
+      req.on("data", (chunk) => (raw += chunk));
+      req.on("end", () => {
+        const { id, password } = JSON.parse(raw) as { id: number; password: string };
+        if (id === 3105 || id === 3106) return json(res, 400, { success: false, message: "No password has been set" });
+        if (id === 1999) return json(res, 404, { success: false, message: "User not found" });
+        json(res, 200, { success: true, data: password === "123456" });
+      });
+      return;
+    }
+    if (req.url?.startsWith("/auth/password/exists/")) {
+      return json(res, 200, { success: true, data: Number(req.url.split("/").pop()) !== 3106 });
+    }
     if (req.url?.startsWith("/search?")) {
       searchUrl = new URL(req.url, "http://local");
       const user = (id: number | null, type: string, name: string) => ({ id, type, name, grade: null, number: null, point: 1000 });
@@ -108,5 +123,25 @@ describe("realGateway.searchTeachers", () => {
       [4001, "홍길동"],
       [4002, "김선생"],
     ]);
+  });
+});
+
+describe("realGateway 결제 비밀번호 상태", () => {
+  it("결제 비밀번호 일치 여부를 돌려주고, 설정하지 않았으면 PIN_NOT_SET이다", async () => {
+    await expect(realGateway.verifyKioskPin(1101, "123456")).resolves.toBe(true);
+    await expect(realGateway.verifyKioskPin(1101, "000000")).resolves.toBe(false);
+    await expect(realGateway.verifyKioskPin(3105, "123456")).rejects.toMatchObject({ code: "PIN_NOT_SET" });
+  });
+
+  it("결제 비밀번호가 있으면 ready, 없으면 가입 여부로 unset·unregistered를 구분한다", async () => {
+    await expect(realGateway.kioskPinStatus(1101)).resolves.toBe("ready");
+    await expect(realGateway.kioskPinStatus(3105)).resolves.toBe("unset");
+    await expect(realGateway.kioskPinStatus(3106)).resolves.toBe("unregistered");
+    await expect(realGateway.kioskPinStatus(1999)).rejects.toMatchObject({ code: "USER_NOT_FOUND" });
+  });
+
+  it("MIRAEPASS에 최초 설정 API가 생기기 전까지 키오스크에서 결제 비밀번호를 만들 수 없다", async () => {
+    expect(realGateway.canSetKioskPin).toBe(false);
+    await expect(realGateway.setInitialKioskPin(3105, "246810")).rejects.toBeInstanceOf(MiraepassError);
   });
 });

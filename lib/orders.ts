@@ -336,6 +336,8 @@ export function mapMiraepassError(e: unknown): ApiError {
         return new ApiError("PAYMENT_UNAVAILABLE", "키오스크 결제 계정의 권한 설정이 필요해요. 카페 관리자에게 알려 주세요", 503);
       case "PIN_NOT_SET":
         return new ApiError("PIN_NOT_SET", "키오스크 비밀번호가 설정되지 않았어요. MIRAEPASS에서 먼저 설정해 주세요", 409);
+      case "PIN_ALREADY_SET":
+        return new ApiError("PIN_ALREADY_SET", "결제 비밀번호가 이미 설정되어 있어요", 409);
       default:
         console.error("[miraepass]", e.code, e.status, e.message);
         return new ApiError("PAYMENT_UNAVAILABLE", FAIL_MESSAGES.PAYMENT_UNAVAILABLE!, 503);

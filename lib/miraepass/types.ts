@@ -9,11 +9,20 @@ export type MPUser = {
   point: number | null;
 };
 
+/**
+ * 키오스크 결제 준비 상태
+ * - ready: 결제 비밀번호가 있음
+ * - unset: MIRAEPASS에 가입했지만(계정 비밀번호 있음) 결제 비밀번호가 없음
+ * - unregistered: MIRAEPASS에 가입하지 않음 (계정 비밀번호도 없음)
+ */
+export type KioskPinStatus = "ready" | "unset" | "unregistered";
+
 export type MPErrorCode =
   | "INSUFFICIENT_POINT"
   | "USER_NOT_FOUND"
   | "INVALID_CREDENTIALS"
   | "PIN_NOT_SET"
+  | "PIN_ALREADY_SET"
   | "UNAUTHORIZED"
   | "FORBIDDEN"
   | "LIMIT_EXCEEDED"
@@ -45,6 +54,12 @@ export interface MiraepassGateway {
   searchTeachers(query: string): Promise<MPUser[]>;
   /** 키오스크 결제 비밀번호(6자리 숫자) 확인. 설정하지 않았으면 PIN_NOT_SET */
   verifyKioskPin(id: number, pin: string): Promise<boolean>;
+  /** 결제 비밀번호가 있는지, 없다면 가입은 했는지 */
+  kioskPinStatus(id: number): Promise<KioskPinStatus>;
+  /** 키오스크에서 결제 비밀번호를 처음 설정할 수 있는지 (MIRAEPASS에 최초 설정 API가 있어야 한다) */
+  canSetKioskPin: boolean;
+  /** 결제 비밀번호(6자리 숫자) 최초 설정. 이미 있으면 PIN_ALREADY_SET */
+  setInitialKioskPin(id: number, pin: string): Promise<void>;
   /** 포인트 차감 → 남은 잔액 (서버가 잔액을 주지 않으면 null) */
   deduct(userId: number, amount: number, memo: string): Promise<number | null>;
   /** 포인트 지급(환불) */
