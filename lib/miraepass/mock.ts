@@ -1,3 +1,4 @@
+import { initialsOf } from "../hangul";
 import { MiraepassError, type MiraepassGateway, type MPUser } from "./types";
 
 /**
@@ -18,6 +19,11 @@ const seed: MockUser[] = [
   { id: 3105, type: "student", name: "한미설", grade: 3, classNo: 1, point: 5000 },
   { id: 4001, type: "teacher", name: "홍길동", grade: null, classNo: null, point: 20000, password: "1234", kioskPin: PIN },
   { id: 4002, type: "teacher", name: "김선생", grade: null, classNo: null, point: 9000, password: "1234", kioskPin: PIN },
+  { id: 4003, type: "teacher", name: "김하늘", grade: null, classNo: null, point: 15000, kioskPin: PIN },
+  { id: 4004, type: "teacher", name: "강바다", grade: null, classNo: null, point: 15000, kioskPin: PIN },
+  { id: 4005, type: "teacher", name: "권도윤", grade: null, classNo: null, point: 15000, kioskPin: PIN },
+  { id: 4006, type: "teacher", name: "이서연", grade: null, classNo: null, point: 15000, kioskPin: PIN },
+  { id: 4007, type: "teacher", name: "황보람", grade: null, classNo: null, point: 15000, kioskPin: PIN },
   { id: 9001, type: "teacher", name: "카페관리자", grade: null, classNo: null, point: 0, password: "admin" },
   { id: 9002, type: "teacher", name: "카페직원", grade: null, classNo: null, point: 0, password: "staff" },
 ];
@@ -37,6 +43,13 @@ export const mockGateway: MiraepassGateway = {
     await latency();
     const u = users.get(id);
     return u && (u.type === "student" || u.type === "teacher") ? strip(u) : null;
+  },
+  async searchTeachers(query) {
+    await latency();
+    // 실제 검색처럼 부분 일치: 검색어가 이름이나 초성 중간에 있어도 나온다
+    return [...users.values()]
+      .filter((u) => u.type === "teacher" && (u.name.includes(query) || initialsOf(u.name).includes(query)))
+      .map(strip);
   },
   async verifyKioskPin(id, pin) {
     await latency();

@@ -5,6 +5,7 @@ export const qk = {
   publicSettings: ["settings", "public"] as const,
   adminSettings: ["admin", "settings"] as const,
   me: ["me"] as const,
+  teachers: (initial: string) => ["teachers", initial] as const,
   activeOrders: ["orders", "active"] as const,
   adminOrders: (params: Record<string, unknown>) => ["admin", "orders", params] as const,
   adminOrder: (id: number) => ["admin", "order", id] as const,

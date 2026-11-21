@@ -38,6 +38,11 @@ export class MiraepassError extends Error {
 export interface MiraepassGateway {
   /** MIRAEPASS ID로 학생·교사 조회. 학생은 학번 4자리(3학년 4반 12번 → 3412), 교사는 고유 4자리 */
   findUser(id: number): Promise<MPUser | null>;
+  /**
+   * 이름 또는 초성으로 교사 검색 (ㅎㄱㄷ → 홍길동). 부분 일치라서 검색어가 이름 중간에 있는 교사도 나온다.
+   * 필요한 범위로 거르는 것은 호출하는 쪽에서 한다
+   */
+  searchTeachers(query: string): Promise<MPUser[]>;
   /** 키오스크 결제 비밀번호(6자리 숫자) 확인. 설정하지 않았으면 PIN_NOT_SET */
   verifyKioskPin(id: number, pin: string): Promise<boolean>;
   /** 포인트 차감 → 남은 잔액 (서버가 잔액을 주지 않으면 null) */

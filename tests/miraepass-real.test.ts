@@ -11,6 +11,7 @@ import { realGateway } from "@/lib/miraepass/real";
 type Mode = "ok" | "hang" | "500" | "400";
 let mode: Mode = "ok";
 let deductCalls = 0;
+let searchUrl: URL | null = null;
 let server: Server;
 
 const json = (res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) => {
@@ -34,6 +35,14 @@ beforeAll(async () => {
       if (mode === "500") return json(res, 500, { success: false, message: "boom" });
       if (mode === "400") return json(res, 400, { success: false, message: "포인트 부족" });
       return json(res, 200, { success: true, data: 4200 });
+    }
+    if (req.url?.startsWith("/search?")) {
+      searchUrl = new URL(req.url, "http://local");
+      const user = (id: number | null, type: string, name: string) => ({ id, type, name, grade: null, number: null, point: 1000 });
+      return json(res, 200, {
+        success: true,
+        data: [user(4001, "teacher", "홍길동"), user(4002, "teacher", "김선생"), user(1101, "student", "김미래"), user(null, "teacher", "미등록")],
+      });
     }
     json(res, 404, { success: false });
   });
@@ -86,5 +95,18 @@ describe("realGateway.deduct", () => {
   it("서버가 거절한 요청(4xx)은 확실한 실패다", async () => {
     mode = "400";
     expect(await deductError()).toMatchObject({ code: "INSUFFICIENT_POINT", uncertain: false });
+  });
+});
+
+describe("realGateway.searchTeachers", () => {
+  it("검색어를 교사 유형으로 검색하고 ID가 있는 교사만 돌려준다", async () => {
+    const found = await realGateway.searchTeachers("ㄱ");
+    expect(searchUrl?.searchParams.get("q")).toBe("ㄱ");
+    expect(searchUrl?.searchParams.getAll("t")).toEqual(["teacher"]);
+    // 서버가 다른 유형을 섞어 보내도 교사만 남긴다
+    expect(found.map((u) => [u.id, u.name])).toEqual([
+      [4001, "홍길동"],
+      [4002, "김선생"],
+    ]);
   });
 });
