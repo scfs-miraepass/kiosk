@@ -72,7 +72,7 @@ export function PinSetupScreen({ shuffle, onHome }: { shuffle: boolean; onHome: 
       setError(null);
       return;
     }
-    if (next !== first) return restart("두 번 누른 비밀번호가 달라요. 처음부터 다시 눌러 주세요");
+    if (next !== first) return restart("비밀번호가 맞지 않아요. 다시 시도해주세요.");
     setPin(next);
     create.mutate(next);
   };
