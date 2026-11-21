@@ -23,6 +23,7 @@ export type MPErrorCode =
   | "INVALID_CREDENTIALS"
   | "PIN_NOT_SET"
   | "PIN_ALREADY_SET"
+  | "NOT_REGISTERED"
   | "UNAUTHORIZED"
   | "FORBIDDEN"
   | "LIMIT_EXCEEDED"
@@ -56,9 +57,9 @@ export interface MiraepassGateway {
   verifyKioskPin(id: number, pin: string): Promise<boolean>;
   /** 결제 비밀번호가 있는지, 없다면 가입은 했는지 */
   kioskPinStatus(id: number): Promise<KioskPinStatus>;
-  /** 키오스크에서 결제 비밀번호를 처음 설정할 수 있는지 (MIRAEPASS에 최초 설정 API가 있어야 한다) */
+  /** 키오스크에서 결제 비밀번호를 처음 설정할 수 있는지. false면 결제 비밀번호가 없는 사용자에게 MIRAEPASS 앱에서 설정하도록 안내한다 */
   canSetKioskPin: boolean;
-  /** 결제 비밀번호(6자리 숫자) 최초 설정. 이미 있으면 PIN_ALREADY_SET */
+  /** 결제 비밀번호(6자리 숫자) 최초 설정. 이미 있으면 PIN_ALREADY_SET, 가입하지 않았으면 NOT_REGISTERED */
   setInitialKioskPin(id: number, pin: string): Promise<void>;
   /** 포인트 차감 → 남은 잔액 (서버가 잔액을 주지 않으면 null) */
   deduct(userId: number, amount: number, memo: string): Promise<number | null>;

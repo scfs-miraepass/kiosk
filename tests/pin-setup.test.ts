@@ -70,7 +70,7 @@ describe("POST /api/customers/pin", () => {
     expect(await mockGateway.kioskPinStatus(3105)).toBe("unset");
   });
 
-  it("키오스크에서 만들 수 없는 환경(MIRAEPASS에 최초 설정 API 없음)에서는 거절한다", async () => {
+  it("키오스크에서 만들 수 없는 환경에서는 거절한다", async () => {
     mockGateway.canSetKioskPin = false;
     try {
       const res = await setup({ id: 3105, pin: "246810" });

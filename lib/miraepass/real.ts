@@ -180,12 +180,15 @@ export const realGateway: MiraepassGateway = {
     return registered ? "unset" : "unregistered";
   },
 
-  // MIRAEPASS에 '키오스크 비밀번호 최초 설정' API가 생기면 true로 바꾸고 setInitialKioskPin에서 호출한다.
-  // 지금 있는 PUT /auth/kiosk는 본인이 로그인한 세션에서만 동작해서 서비스 계정으로는 설정할 수 없다
-  canSetKioskPin: false,
+  canSetKioskPin: true,
 
-  async setInitialKioskPin() {
-    throw new MiraepassError("UNAVAILABLE", "MIRAEPASS에 키오스크 비밀번호 최초 설정 API가 아직 없어요");
+  async setInitialKioskPin(id, pin) {
+    // 서비스 계정 전용 API. 결제 비밀번호가 없는 가입자만 설정되고, 이미 있으면 409로 거절된다 (덮어쓰지 않는다)
+    await service.run<void>((api) => api.initKioskPassword({ body: { id, password: pin } }), {
+      400: "NOT_REGISTERED",
+      404: "USER_NOT_FOUND",
+      409: "PIN_ALREADY_SET",
+    });
   },
 
   async deduct(userId, amount, memo) {

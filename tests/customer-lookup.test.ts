@@ -81,7 +81,7 @@ describe("결제 비밀번호 준비 상태", () => {
     expect(res.json.code).toBe("NOT_REGISTERED");
   });
 
-  it("키오스크에서 만들 수 없으면(MIRAEPASS에 최초 설정 API 없음) 조회 단계에서 미리 안내한다", async () => {
+  it("키오스크에서 만들 수 없는 환경이면 조회 단계에서 미리 MIRAEPASS에서 설정하도록 안내한다", async () => {
     mockGateway.canSetKioskPin = false;
     try {
       const res = await lookup({ id: 3105, items: cart(1) });

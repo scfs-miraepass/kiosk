@@ -69,7 +69,8 @@ export const mockGateway: MiraepassGateway = {
   async setInitialKioskPin(id, pin) {
     await latency();
     const u = users.get(id);
-    if (!u || u.unregistered) throw new MiraepassError("USER_NOT_FOUND", "사용자를 찾을 수 없어요", 404);
+    if (!u) throw new MiraepassError("USER_NOT_FOUND", "사용자를 찾을 수 없어요", 404);
+    if (u.unregistered) throw new MiraepassError("NOT_REGISTERED", "MIRAEPASS에 가입하지 않은 사용자예요", 400);
     if (u.kioskPin) throw new MiraepassError("PIN_ALREADY_SET", "키오스크 비밀번호가 이미 설정되어 있어요", 400);
     u.kioskPin = pin;
   },

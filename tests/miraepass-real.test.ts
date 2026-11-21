@@ -12,6 +12,7 @@ type Mode = "ok" | "hang" | "500" | "400";
 let mode: Mode = "ok";
 let deductCalls = 0;
 let searchUrl: URL | null = null;
+let initBody: { id: number; password: string } | null = null;
 let server: Server;
 
 const json = (res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) => {
@@ -48,7 +49,18 @@ beforeAll(async () => {
       });
       return;
     }
-    if (req.url?.startsWith("/auth/password/exists/")) {
+    if (req.url === "/auth/kiosk/init") {
+      let raw = "";
+      req.on("data", (chunk) => (raw += chunk));
+      req.on("end", () => {
+        initBody = JSON.parse(raw) as { id: number; password: string };
+        if (initBody.id === 3105) return void res.writeHead(204).end();
+        if (initBody.id === 3106) return json(res, 400, { success: false, message: "Password has not been set" });
+        if (initBody.id === 1999) return json(res, 404, { success: false, message: "User not found" });
+        json(res, 409, { success: false, message: "Kiosk password already set" });
+      });
+      return;
+    }    if (req.url?.startsWith("/auth/password/exists/")) {
       return json(res, 200, { success: true, data: Number(req.url.split("/").pop()) !== 3106 });
     }
     if (req.url?.startsWith("/search?")) {
@@ -140,8 +152,15 @@ describe("realGateway 결제 비밀번호 상태", () => {
     await expect(realGateway.kioskPinStatus(1999)).rejects.toMatchObject({ code: "USER_NOT_FOUND" });
   });
 
-  it("MIRAEPASS에 최초 설정 API가 생기기 전까지 키오스크에서 결제 비밀번호를 만들 수 없다", async () => {
-    expect(realGateway.canSetKioskPin).toBe(false);
-    await expect(realGateway.setInitialKioskPin(3105, "246810")).rejects.toBeInstanceOf(MiraepassError);
+  it("결제 비밀번호가 없는 가입자의 비밀번호를 처음 한 번 설정한다", async () => {
+    expect(realGateway.canSetKioskPin).toBe(true);
+    await expect(realGateway.setInitialKioskPin(3105, "246810")).resolves.toBeUndefined();
+    expect(initBody).toEqual({ id: 3105, password: "246810" });
+  });
+
+  it("이미 있으면 PIN_ALREADY_SET, 미가입이면 NOT_REGISTERED, 없는 사용자면 USER_NOT_FOUND다", async () => {
+    await expect(realGateway.setInitialKioskPin(1101, "246810")).rejects.toMatchObject({ code: "PIN_ALREADY_SET" });
+    await expect(realGateway.setInitialKioskPin(3106, "246810")).rejects.toMatchObject({ code: "NOT_REGISTERED" });
+    await expect(realGateway.setInitialKioskPin(1999, "246810")).rejects.toMatchObject({ code: "USER_NOT_FOUND" });
   });
 });
