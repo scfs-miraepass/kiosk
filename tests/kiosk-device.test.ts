@@ -6,6 +6,9 @@ import { describe, expect, it } from "vitest";
 /** 기기 로컬 서비스(Python)의 업데이트 판단 로직을 확인한다. 틀리면 업데이트가 안 되거나 잘못된 버전으로 내려간다. */
 const CONTROL = path.join(process.cwd(), "scripts", "kiosk-device", "miraepass-kiosk-control.py");
 
+// Windows의 python3는 Microsoft Store 연결용 껍데기라 실행되지 않는다
+const PYTHON = process.platform === "win32" ? "python" : "python3";
+
 function py<T>(expr: string): T {
   const code = `
 import importlib.util, json, sys
@@ -14,7 +17,7 @@ spec = importlib.util.spec_from_file_location("m", ${JSON.stringify(CONTROL)})
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 print(json.dumps(${expr}))
 `;
-  return JSON.parse(execFileSync("python3", ["-I", "-B", "-c", code], { encoding: "utf8" })) as T;
+  return JSON.parse(execFileSync(PYTHON, ["-I", "-B", "-c", code], { encoding: "utf8" })) as T;
 }
 
 describe("kiosk device updater", () => {

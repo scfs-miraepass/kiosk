@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 // lib/db는 처음 쓸 때 DATABASE_PATH를 읽으므로 import 전에 테스트 전용 DB를 지정한다
 vi.hoisted(() => {
-  const tmp = process.env.TMPDIR ?? "/tmp";
+  const tmp = process.env.TMPDIR ?? process.env.TEMP ?? "/tmp";
   process.env.DATABASE_PATH = `${tmp}/cafe-test-${process.pid}-${Date.now()}/cafe.db`;
   process.env.MIRAEPASS_MOCK = "1";
   process.env.MIRAEPASS_MOCK_LATENCY = "0";
@@ -168,5 +168,7 @@ describe("서버 재시작 복구", () => {
 });
 
 afterAll(() => {
+  // Windows는 열려 있는 DB 파일을 지울 수 없다
+  db.$client.close();
   fs.rmSync(path.dirname(process.env.DATABASE_PATH!), { recursive: true, force: true });
 });

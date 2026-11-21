@@ -33,6 +33,12 @@ yarn dev                 # http://localhost:3000
 
 `MIRAEPASS_MOCK=1`이면 실제 MIRAEPASS 대신 모의 데이터로 동작합니다.
 
+### Windows에서 개발하기
+
+- 의존성은 `yarn install --ignore-scripts`로 설치합니다. yarn 1은 `better-sqlite3`를 소스 빌드하려고 하는데, Visual Studio C++ 빌드 도구가 없으면 설치가 중단됩니다. 패키지에 Windows용 바이너리가 들어 있어 빌드하지 않아도 됩니다.
+- `yarn test`의 기기 펌웨어 테스트는 Python 3을 `python` 명령으로 실행합니다. (`python3`은 Microsoft Store 연결용이라 쓰지 않습니다)
+- 셸 스크립트·Dockerfile·`scripts/kiosk-device`는 `.gitattributes`로 줄바꿈을 LF로 고정했습니다. 이 설정 전에 받은 작업 폴더는 해당 파일을 다시 체크아웃해야 LF로 바뀝니다.
+
 | 용도 | ID | 비밀번호 / 비고 |
 |---|---|---|
 | 관리자 | 9001 | `admin` |

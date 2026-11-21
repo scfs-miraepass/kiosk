@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as schema from "./schema";
 
-export type DB = BetterSQLite3Database<typeof schema>;
+export type DB = BetterSQLite3Database<typeof schema> & { $client: Database.Database };
 
 declare global {
   var __cafeDb: DB | undefined;
