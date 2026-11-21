@@ -1,0 +1,6 @@
+# Windows(core.autocrlf=true)에서 받아도 리눅스에서 실행되는 파일은 LF로 둡니다.
+# CRLF가 섞이면 Docker 엔트리포인트와 키오스크 기기 설치 스크립트가 실행되지 않습니다.
+*.sh text eol=lf
+*.py text eol=lf
+Dockerfile text eol=lf
+scripts/kiosk-device/** text eol=lf

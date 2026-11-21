@@ -3,7 +3,7 @@ import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
-  const tmp = process.env.TMPDIR ?? "/tmp";
+  const tmp = process.env.TMPDIR ?? process.env.TEMP ?? "/tmp";
   process.env.DATABASE_PATH = `${tmp}/cafe-lookup-${process.pid}-${Date.now()}/cafe.db`;
   process.env.MIRAEPASS_MOCK = "1";
   process.env.MIRAEPASS_MOCK_LATENCY = "0";
@@ -14,6 +14,7 @@ vi.hoisted(() => {
 import { POST } from "@/app/api/customers/lookup/route";
 import { resetRateLimit } from "@/lib/api";
 import { db, schema } from "@/lib/db";
+import { mockGateway } from "@/lib/miraepass/mock";
 
 let latte: number;
 
@@ -22,7 +23,11 @@ beforeAll(() => {
   latte = db.insert(schema.menuItems).values({ categoryId: cat.id, name: "라떼", price: 2000 }).returning().get().id;
 });
 beforeEach(() => resetRateLimit());
-afterAll(() => fs.rmSync(path.dirname(process.env.DATABASE_PATH!), { recursive: true, force: true }));
+afterAll(() => {
+  // Windows는 열려 있는 DB 파일을 지울 수 없다
+  db.$client.close();
+  fs.rmSync(path.dirname(process.env.DATABASE_PATH!), { recursive: true, force: true });
+});
 
 const lookup = async (body: unknown) => {
   const req = new Request("http://local/api/customers/lookup", {
@@ -56,5 +61,36 @@ describe("POST /api/customers/lookup", () => {
     expect(res.status).toBe(429);
     // 다른 ID는 영향 없음
     expect((await lookup({ id: 1101, items: cart(1) })).status).toBe(200);
+  });
+});
+
+describe("결제 비밀번호 준비 상태", () => {
+  it("결제 비밀번호가 있으면 바로 결제 화면으로 간다", async () => {
+    expect((await lookup({ id: 2307, items: cart(1) })).json.data.needsPinSetup).toBe(false);
+  });
+
+  it("가입은 했지만 결제 비밀번호가 없으면 키오스크에서 만들도록 알린다", async () => {
+    const res = await lookup({ id: 3105, items: cart(1) });
+    expect(res.status).toBe(200);
+    expect(res.json.data.needsPinSetup).toBe(true);
+  });
+
+  it("MIRAEPASS에 가입하지 않은 사용자는 이용할 수 없다고 안내한다", async () => {
+    const res = await lookup({ id: 3106, items: cart(1) });
+    expect(res.status).toBe(409);
+    expect(res.json.code).toBe("NOT_REGISTERED");
+  });
+
+  it("키오스크에서 만들 수 없는 환경이면 조회 단계에서 미리 MIRAEPASS에서 설정하도록 안내한다", async () => {
+    mockGateway.canSetKioskPin = false;
+    try {
+      const res = await lookup({ id: 3105, items: cart(1) });
+      expect(res.status).toBe(409);
+      expect(res.json.code).toBe("PIN_NOT_SET");
+      // 결제 비밀번호가 있는 사용자는 영향 없음
+      expect((await lookup({ id: 2307, items: cart(1) })).status).toBe(200);
+    } finally {
+      mockGateway.canSetKioskPin = true;
+    }
   });
 });

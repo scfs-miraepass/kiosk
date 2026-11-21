@@ -99,6 +99,14 @@ export type CustomerCandidate = {
   classNo: number | null;
   /** 잔액 조회가 불가능하면 null */
   sufficient: boolean | null;
+  /** 결제 비밀번호가 아직 없어서 키오스크에서 먼저 만들어야 함 */
+  needsPinSetup: boolean;
+};
+
+/** 키오스크의 교사 이름 찾기 목록 한 줄. ID는 고른 뒤 조회에만 쓰고 화면에 보여 주지 않는다 */
+export type TeacherOption = {
+  id: number;
+  name: string;
 };
 
 export type CartLineInput = {
@@ -184,6 +192,10 @@ export type ApiErrorCode =
   | "INVALID_CREDENTIALS"
   | "INVALID_PIN"
   | "PIN_NOT_SET"
+  /** 결제 비밀번호를 만들려는데 이미 있음 (키오스크는 일반 결제 화면으로) */
+  | "PIN_ALREADY_SET"
+  /** MIRAEPASS에 가입하지 않은 사용자 (계정 비밀번호 없음) */
+  | "NOT_REGISTERED"
   | "PIN_LOCKED"
   | "NOT_FOUND"
   | "VALIDATION"

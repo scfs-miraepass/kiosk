@@ -7,7 +7,7 @@ import type { CreateOrderResult, CustomerCandidate, MenuItemDTO, OptionSnapshot 
 
 /** Jotai: 키오스크 한 세션(주문 1건) 동안의 클라이언트 상태 */
 
-export type KioskStep = "attract" | "menu" | "review" | "identify" | "pin" | "done" | "error";
+export type KioskStep = "attract" | "menu" | "review" | "identify" | "pin" | "pin-setup" | "done" | "error";
 
 export type CartLine = {
   key: string;

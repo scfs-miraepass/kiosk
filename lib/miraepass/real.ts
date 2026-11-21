@@ -129,6 +129,26 @@ declare global {
 }
 const service = (globalThis.__mpService ??= new ServiceSession());
 
+/** 키오스크 결제 비밀번호 검사: 일치 여부, 설정하지 않은 사용자는 null */
+async function checkKioskPin(id: number, pin: string): Promise<boolean | null> {
+  const res = await service.runRaw((api) =>
+    api.kioskPasswordVerify({
+      body: { id, password: pin },
+      // 서버는 일치 여부를 응답 봉투의 success에 담는다. SDK의 응답 스키마 검사(data: boolean)를 거치지 않고 원본을 읽는다
+      responseTransformer: async (data: unknown) => data,
+    }),
+  );
+  const status = res.response?.status;
+  if (status === 200) {
+    const body = res.data as { success?: unknown; data?: unknown } | undefined;
+    return body?.success === true && body.data !== false;
+  }
+  if (status === 400) return null;
+  if (status === 404) throw new MiraepassError("USER_NOT_FOUND", "사용자를 찾을 수 없어요", 404);
+  if (status === 403) throw new MiraepassError("FORBIDDEN", "서비스 계정으로만 비밀번호를 검사할 수 있어요", 403);
+  throw new MiraepassError("UNAVAILABLE", messageOf(res.error), status);
+}
+
 export const realGateway: MiraepassGateway = {
   async findUser(id) {
     // 4자리 이상 숫자 검색어는 ID(학번)와 정확히 일치하는 사용자만 돌려준다
@@ -139,23 +159,36 @@ export const realGateway: MiraepassGateway = {
     return user ? toMPUser(user) : null;
   },
 
+  async searchTeachers(query) {
+    const list = await service.run<User[]>((api) => api.searchSearchGet({ query: { q: query, t: [UserType.TEACHER] } }));
+    return (list ?? []).filter((u) => u.type === UserType.TEACHER && typeof u.id === "number").map(toMPUser);
+  },
+
   async verifyKioskPin(id, pin) {
-    const res = await service.runRaw((api) =>
-      api.kioskPasswordVerify({
-        body: { id, password: pin },
-        // 서버는 일치 여부를 응답 봉투의 success에 담는다. SDK의 응답 스키마 검사(data: boolean)를 거치지 않고 원본을 읽는다
-        responseTransformer: async (data: unknown) => data,
-      }),
+    const matched = await checkKioskPin(id, pin);
+    if (matched === null) throw new MiraepassError("PIN_NOT_SET", "키오스크 비밀번호가 설정되지 않았어요", 400);
+    return matched;
+  },
+
+  async kioskPinStatus(id) {
+    // 빈 비밀번호로 검사하면 설정 여부만 알 수 있다 (설정돼 있으면 '불일치', 없으면 400)
+    if ((await checkKioskPin(id, "")) !== null) return "ready";
+    // 결제 비밀번호가 없으면 가입(계정 비밀번호 설정)은 했는지 확인한다
+    const registered = await service.run<boolean>((api) =>
+      api.checkPasswordExistsAuthPasswordExistsUserIdGet({ path: { user_id: id } }),
     );
-    const status = res.response?.status;
-    if (status === 200) {
-      const body = res.data as { success?: unknown; data?: unknown } | undefined;
-      return body?.success === true && body.data !== false;
-    }
-    if (status === 400) throw new MiraepassError("PIN_NOT_SET", "키오스크 비밀번호가 설정되지 않았어요", 400);
-    if (status === 404) throw new MiraepassError("USER_NOT_FOUND", "사용자를 찾을 수 없어요", 404);
-    if (status === 403) throw new MiraepassError("FORBIDDEN", "서비스 계정으로만 비밀번호를 검사할 수 있어요", 403);
-    throw new MiraepassError("UNAVAILABLE", messageOf(res.error), status);
+    return registered ? "unset" : "unregistered";
+  },
+
+  canSetKioskPin: true,
+
+  async setInitialKioskPin(id, pin) {
+    // 서비스 계정 전용 API. 결제 비밀번호가 없는 가입자만 설정되고, 이미 있으면 409로 거절된다 (덮어쓰지 않는다)
+    await service.run<void>((api) => api.initKioskPassword({ body: { id, password: pin } }), {
+      400: "NOT_REGISTERED",
+      404: "USER_NOT_FOUND",
+      409: "PIN_ALREADY_SET",
+    });
   },
 
   async deduct(userId, amount, memo) {
