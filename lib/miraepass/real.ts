@@ -139,6 +139,11 @@ export const realGateway: MiraepassGateway = {
     return user ? toMPUser(user) : null;
   },
 
+  async searchTeachers(query) {
+    const list = await service.run<User[]>((api) => api.searchSearchGet({ query: { q: query, t: [UserType.TEACHER] } }));
+    return (list ?? []).filter((u) => u.type === UserType.TEACHER && typeof u.id === "number").map(toMPUser);
+  },
+
   async verifyKioskPin(id, pin) {
     const res = await service.runRaw((api) =>
       api.kioskPasswordVerify({

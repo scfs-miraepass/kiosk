@@ -101,6 +101,12 @@ export type CustomerCandidate = {
   sufficient: boolean | null;
 };
 
+/** 키오스크의 교사 이름 찾기 목록 한 줄. ID는 고른 뒤 조회에만 쓰고 화면에 보여 주지 않는다 */
+export type TeacherOption = {
+  id: number;
+  name: string;
+};
+
 export type CartLineInput = {
   menuItemId: number;
   quantity: number;
