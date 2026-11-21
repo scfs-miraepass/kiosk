@@ -33,6 +33,7 @@ import type { OrderCallPayload, OrderDTO, OrderStatus, VoiceSettings } from "@/l
 import { cn } from "@/lib/utils";
 import { freshOrderIdsAtom, soundUnlockedAtom, staffPrefsAtom } from "@/store/staff";
 import { CancelDialog } from "./cancel-dialog";
+import { InstallAppButton } from "./install-app";
 import { OrderCard, type CardAction } from "./order-card";
 import { SoldOutDrawer } from "./sold-out-drawer";
 
@@ -189,6 +190,7 @@ export function StaffBoard() {
             <PackageX /> <span className="hidden sm:inline">품절 관리</span>
           </Button>
           <SoundSettings />
+          <InstallAppButton />
           {isAdmin && (
             <Button variant="outline" size="icon-lg" asChild aria-label="관리자">
               <Link href="/admin">
