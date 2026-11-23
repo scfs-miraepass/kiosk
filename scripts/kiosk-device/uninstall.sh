@@ -4,7 +4,7 @@
 #   sudo miraepass-kiosk-uninstall          # 설치 시 함께 복사됨
 #   sudo ./scripts/kiosk-device/uninstall.sh
 #
-# install.sh가 추가한 서비스·파일과 키오스크 설정(기기 토큰, 화면 방향, 방화벽, PIN 등)을 모두 지우고,
+# install.sh가 추가한 서비스·파일과 키오스크 설정(기기 토큰, 화면 방향, 소리, 방화벽, PIN 등)을 모두 지우고,
 # 설치 전에 기록해 둔 시스템 설정을 되돌린다. 삭제 후 install.sh를 다시 실행하면 기본값으로 새로 설치된다.
 #
 # 일부러 그대로 두는 것 (SSH로 작업하는 도중 연결이 끊기지 않도록)
@@ -79,6 +79,7 @@ rm -f \
   /etc/default/miraepass-kiosk \
   /etc/default/miraepass-kiosk-control \
   /etc/X11/xorg.conf.d/99-miraepass-touch-rotation.conf \
+  /etc/alsa/conf.d/60-miraepass-kiosk.conf \
   /etc/modprobe.d/miraepass-wifi-country.conf \
   /etc/chromium/policies/managed/miraepass-kiosk.json \
   /etc/chromium-browser/policies/managed/miraepass-kiosk.json \
@@ -130,7 +131,7 @@ rm -f /usr/local/sbin/miraepass-kiosk-uninstall
 echo
 echo "삭제 완료"
 echo "- 재부팅하면 키오스크 화면 대신 콘솔(또는 원래 로그인 화면)이 나옵니다: sudo reboot"
-echo "- 남겨 둔 것: 설치한 패키지, 네트워크 연결 설정, SSH 상태, ${KIOSK_USER:-키오스크 사용자}의 그룹(video·input·render·tty)"
+echo "- 남겨 둔 것: 설치한 패키지, 네트워크 연결 설정, SSH 상태, ${KIOSK_USER:-키오스크 사용자}의 그룹(video·input·render·tty·audio)"
 if [[ -n "${NM_NOTE}" ]]; then
   echo "- 설치 때 네트워크 관리를 NetworkManager로 전환했습니다 (이전: ${NM_NOTE})."
   echo "  NetworkManager로 계속 써도 됩니다. 되돌리려면 이전 설정을 직접 복원하세요."
