@@ -34,13 +34,13 @@ export function NumericKeypad({
 
   const keys = [...digits.slice(0, 9), "clear", digits[9], "del"];
   const base =
-    "flex h-16 items-center justify-center rounded-2xl text-3xl font-semibold transition-transform duration-100 active:scale-95 md:h-20";
+    "flex h-16 items-center justify-center rounded-2xl text-3xl font-semibold transition-transform duration-100 active:scale-95 md:h-20 lg:h-24 lg:text-4xl";
 
   return (
     <div className={cn("grid grid-cols-3 gap-2.5 md:gap-3", className)}>
       {keys.map((k) =>
         k === "clear" ? (
-          <button key={k} onClick={onClear} className={cn(base, "bg-slate-200 text-lg text-slate-600", keyClassName)}>
+          <button key={k} onClick={onClear} className={cn(base, "bg-slate-200 text-lg text-slate-600 lg:text-xl", keyClassName)}>
             전체삭제
           </button>
         ) : k === "del" ? (
