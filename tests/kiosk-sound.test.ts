@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { numberClips, VOICE, VOICE_CLIPS } from "@/lib/kiosk-sound";
+import { numberClips, VOICE, VOICE_CLIPS, voicedRange } from "@/lib/kiosk-sound";
 
 describe("kiosk voice guide", () => {
   it.each([
@@ -36,5 +36,24 @@ describe("kiosk voice guide", () => {
     const readme = readFileSync(path.join(process.cwd(), "public", "sounds", "voice", "README.md"), "utf8");
     const rows = [...readme.matchAll(/^\| `([^`]+)\.mp3` \| (.+?) \|/gm)].map((m) => [m[1], m[2]]);
     expect(Object.fromEntries(rows)).toEqual(VOICE_CLIPS);
+  });
+});
+
+describe("voicedRange", () => {
+  const rate = 1000;
+  const clip = (lead: number, sound: number, tail: number) => [...Array(lead).fill(0), ...Array(sound).fill(0.5), ...Array(tail).fill(0.001)];
+
+  it("앞뒤 무음을 자르고 앞 0.02초·뒤 0.05초만 남긴다", () => {
+    const r = voicedRange(clip(110, 400, 120), rate);
+    expect(r.start).toBeCloseTo(0.09);
+    expect(r.end).toBeCloseTo(0.56);
+  });
+
+  it("무음이 거의 없으면 파일 범위를 넘지 않는다", () => {
+    expect(voicedRange(clip(5, 100, 10), rate)).toEqual({ start: 0, end: 0.115 });
+  });
+
+  it("전부 무음이면 그대로 둔다", () => {
+    expect(voicedRange(clip(50, 0, 50), rate)).toEqual({ start: 0, end: 0.1 });
   });
 });

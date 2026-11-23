@@ -170,19 +170,58 @@ export function playEffect(effect: SoundEffect) {
 
 // ───────────────────────── 음성 안내 ─────────────────────────
 
-/** 녹음 파일: 이름별로 한 번만 받는다. 없거나(404) 읽을 수 없으면 null */
-const clipCache = new Map<string, Promise<AudioBuffer | null>>();
+/** 이보다 작은 소리는 무음으로 본다 (-45dBFS) */
+const SILENCE = 10 ** (-45 / 20);
+/** 무음을 자른 뒤 남겨 둘 여유 (초). 문장을 이을 때 사이 간격은 앞 파일 뒤 + 다음 파일 앞 = 약 0.07초 */
+const PAD_START = 0.02;
+const PAD_END = 0.05;
 
-function loadClip(name: string): Promise<AudioBuffer | null> {
+/**
+ * 소리가 있는 구간(초). 녹음·TTS 파일은 앞뒤에 0.1~0.3초 무음이 붙어 있는 경우가 많아,
+ * 숫자 파일(삼·십·칠)을 그대로 이어 붙이면 "삼… 십… 칠"처럼 끊겨 들린다. 재생할 때 이 구간만 쓴다.
+ */
+export function voicedRange(samples: ArrayLike<number>, sampleRate: number): { start: number; end: number } {
+  let first = -1;
+  let last = -1;
+  for (let i = 0; i < samples.length; i++) {
+    if (Math.abs(samples[i]) > SILENCE) {
+      if (first < 0) first = i;
+      last = i;
+    }
+  }
+  const duration = samples.length / sampleRate;
+  if (first < 0) return { start: 0, end: duration };
+  return { start: Math.max(0, first / sampleRate - PAD_START), end: Math.min(duration, (last + 1) / sampleRate + PAD_END) };
+}
+
+type Clip = { buffer: AudioBuffer; start: number; end: number };
+
+/**
+ * 녹음 파일: 이름별로 한 번만 받는다. 파일이 없거나(404) 읽을 수 없으면 null로 기억한다.
+ * 네트워크 오류처럼 잠깐의 실패는 기억하지 않고 다음 안내 때 다시 받는다 (부팅 직후 망이 늦게 붙어도 복구되도록).
+ */
+const clipCache = new Map<string, Promise<Clip | null>>();
+
+function loadClip(name: string): Promise<Clip | null> {
   let cached = clipCache.get(name);
   if (!cached) {
     cached = (async () => {
       const ac = audio();
       if (!ac) return null;
+      let data: ArrayBuffer;
       try {
         const res = await fetch(`${VOICE_DIR}/${name}.mp3`);
-        if (!res.ok) return null;
-        return await ac.decodeAudioData(await res.arrayBuffer());
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        data = await res.arrayBuffer();
+      } catch {
+        clipCache.delete(name);
+        return null;
+      }
+      try {
+        // 확장자와 상관없이 내용으로 형식을 알아낸다 (mp3·wav·ogg 등)
+        const buffer = await ac.decodeAudioData(data);
+        return { buffer, ...voicedRange(buffer.getChannelData(0), buffer.sampleRate) };
       } catch {
         return null;
       }
@@ -217,18 +256,18 @@ export async function speak(voiceLine: VoiceLine) {
   if (!enabled.voice) return;
   const mine = generation;
 
-  const buffers = await Promise.all(voiceLine.clips.map(loadClip));
+  const clips = await Promise.all(voiceLine.clips.map(loadClip));
   if (mine !== generation) return; // 기다리는 사이 다른 안내가 왔다
   const ac = audio();
-  if (ac && buffers.every((b): b is AudioBuffer => b !== null)) {
-    // 파일을 틈 없이 이어서 재생한다
+  if (ac && clips.every((c): c is Clip => c !== null)) {
+    // 소리가 있는 구간만 틈 없이 이어서 재생한다 (오디오 스레드가 시각에 맞춰 이어 주므로 메인 스레드가 바빠도 끊기지 않는다)
     let t = ac.currentTime + 0.05;
-    playing = buffers.map((buffer) => {
+    playing = clips.map(({ buffer, start, end }) => {
       const src = ac.createBufferSource();
       src.buffer = buffer;
       src.connect(ac.destination);
-      src.start(t);
-      t += buffer.duration;
+      src.start(t, start, end - start);
+      t += end - start;
       return src;
     });
     return;
