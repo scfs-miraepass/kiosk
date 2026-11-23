@@ -152,6 +152,7 @@ function OptionForm({
           </button>
           <button
             disabled={!valid}
+            data-sound="add"
             onClick={() => onAdd(selected, quantity)}
             className="h-16 rounded-2xl bg-primary text-lg font-bold text-primary-foreground active:scale-[0.98] disabled:opacity-40"
           >

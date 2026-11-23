@@ -29,6 +29,7 @@ export function CartList({ size = "md", emptyText = "메뉴를 선택해 주세�
               )}
             </div>
             <button
+              data-sound="remove"
               onClick={() => remove(l.key)}
               className="-m-1 flex size-9 items-center justify-center rounded-full text-slate-400 active:bg-slate-100"
               aria-label={`${l.name} 삭제`}
@@ -39,6 +40,7 @@ export function CartList({ size = "md", emptyText = "메뉴를 선택해 주세�
           <div className="mt-2 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <button
+                data-sound="remove"
                 onClick={() => update({ key: l.key, delta: -1 })}
                 className={cn("flex items-center justify-center rounded-full bg-slate-100 active:scale-95", lg ? "size-11" : "size-9")}
                 aria-label="수량 줄이기"
@@ -47,6 +49,7 @@ export function CartList({ size = "md", emptyText = "메뉴를 선택해 주세�
               </button>
               <span className={cn("w-6 text-center font-bold tabular-nums", lg ? "text-xl" : "text-lg")}>{l.quantity}</span>
               <button
+                data-sound="add"
                 onClick={() => update({ key: l.key, delta: 1 })}
                 className={cn("flex items-center justify-center rounded-full bg-slate-100 active:scale-95", lg ? "size-11" : "size-9")}
                 aria-label="수량 늘리기"

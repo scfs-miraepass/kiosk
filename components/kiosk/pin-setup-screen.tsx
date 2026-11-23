@@ -6,6 +6,7 @@ import { AlertTriangle, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, ClientApiError } from "@/lib/fetcher";
 import { candidateHonorific, formatPoint } from "@/lib/format";
+import { playEffect, speak, VOICE } from "@/lib/kiosk-sound";
 import { cn } from "@/lib/utils";
 import { cartTotalAtom, customerAtom, paymentPendingAtom, stepAtom } from "@/store/kiosk";
 import { NumericKeypad } from "./numeric-keypad";
@@ -39,6 +40,7 @@ export function PinSetupScreen({ shuffle, onHome }: { shuffle: boolean; onHome: 
     setFirst(null);
     setPin("");
     setError({ message, at: Date.now() });
+    playEffect("error");
   };
 
   // 방금 만든 비밀번호가 틀릴 일은 없지만, 그렇게 응답이 오면 일반 결제 화면에서 다시 입력받는다
@@ -75,6 +77,7 @@ export function PinSetupScreen({ shuffle, onHome }: { shuffle: boolean; onHome: 
       setFirst(next);
       setPin("");
       setError(null);
+      void speak(VOICE.pinConfirm());
       return;
     }
     if (next !== first) return restart("처음 누른 숫자와 달라요. 다시 시도해 주세요.");

@@ -4,6 +4,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { AlertTriangle, Loader2, LockKeyhole } from "lucide-react";
 import { useState } from "react";
 import { candidateHonorific, formatPoint } from "@/lib/format";
+import { playEffect, speak, VOICE } from "@/lib/kiosk-sound";
 import { cn } from "@/lib/utils";
 import { cartTotalAtom, customerAtom, stepAtom } from "@/store/kiosk";
 import { NumericKeypad } from "./numeric-keypad";
@@ -29,6 +30,8 @@ export function PinScreen({ shuffle, onHome }: { shuffle: boolean; onHome: () =>
     onInvalidPin: (message) => {
       setPin("");
       setError({ message, at: Date.now() });
+      playEffect("error");
+      void speak(VOICE.pinWrong());
     },
   });
   const busy = submit.isPending;

@@ -3,15 +3,17 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { Loader2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useMenu, usePublicSettings, useStoreStatus } from "@/hooks/queries";
 import { useIdleTimer } from "@/hooks/use-idle-timer";
 import { useSocket } from "@/hooks/use-socket";
 import { api, KIOSK_UNREGISTERED_EVENT } from "@/lib/fetcher";
+import { configureKioskSound, playEffect, preloadVoice, type SoundEffect, speak, stopVoice, VOICE } from "@/lib/kiosk-sound";
 import { qk } from "@/lib/query-keys";
 import type { MenuItemDTO } from "@/lib/types";
 import {
   kioskTokenAtom,
+  orderResultAtom,
   paymentPendingAtom,
   resetKioskAtom,
   stepAtom,
@@ -129,7 +131,8 @@ function KioskFlow({ token }: { token: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [menuMap, syncCart]);
 
-  const kiosk = settings.data?.kiosk ?? { idleSeconds: 60, doneSeconds: 10, shufflePinPad: true };
+  const kiosk = settings.data?.kiosk ?? { idleSeconds: 60, doneSeconds: 10, shufflePinPad: true, soundEffects: true, voiceGuide: true };
+  useKioskSound(step, kiosk.soundEffects, kiosk.voiceGuide && !adminOpen);
   const goHome = useCallback(() => reset("attract"), [reset]);
   const finish = useCallback(() => reset("attract"), [reset]);
 
@@ -201,6 +204,71 @@ function KioskFlow({ token }: { token: string }) {
       {adminLayer}
     </div>
   );
+}
+
+const SOUND_EFFECTS: SoundEffect[] = ["tap", "add", "remove", "success", "error"];
+/** 단계마다 하는 음성 안내 (done·error는 효과음과 함께 따로 처리) */
+const STEP_VOICE: Partial<Record<KioskStep, () => { text: string; clips: string[] }>> = {
+  review: VOICE.review,
+  identify: VOICE.identify,
+  pin: VOICE.pin,
+  "pin-setup": VOICE.pinSetup,
+};
+
+/**
+ * 키오스크 소리.
+ * - 버튼을 누르면 '톡' 효과음. 버튼에 data-sound="add|remove|success|error|off"를 달면 그 소리로 바꾸거나 끈다.
+ * - 화면이 바뀌면 그 화면에서 할 일을 음성으로 안내하고, 주문이 끝나면 주문번호를 읽어 준다.
+ */
+function useKioskSound(step: KioskStep, effects: boolean, voice: boolean) {
+  const result = useAtomValue(orderResultAtom);
+  const prev = useRef<KioskStep>(step);
+
+  useEffect(() => {
+    configureKioskSound({ effects, voice });
+  }, [effects, voice]);
+
+  useEffect(() => {
+    preloadVoice();
+    // click은 실제로 누른 경우에만 생긴다 (스크롤하려고 댄 손가락에는 소리를 내지 않는다)
+    const onClick = (e: MouseEvent) => {
+      const el = (e.target as Element | null)?.closest?.("button, [role='button'], a[href], [data-sound]");
+      if (!el || (el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true") return;
+      const wanted = el.getAttribute("data-sound");
+      if (wanted === "off") return;
+      playEffect(SOUND_EFFECTS.includes(wanted as SoundEffect) ? (wanted as SoundEffect) : "tap");
+    };
+    document.addEventListener("click", onClick, true);
+    return () => {
+      document.removeEventListener("click", onClick, true);
+      stopVoice();
+    };
+  }, []);
+
+  useEffect(() => {
+    const from = prev.current;
+    prev.current = step;
+    if (from === step) return;
+    if (step === "attract") return stopVoice();
+    if (step === "menu") {
+      // 처음 시작할 때만 인사한다 (주문 확인에서 '더 담기'로 돌아올 때는 말하지 않음)
+      if (from === "attract") void speak(VOICE.welcome());
+      else stopVoice();
+      return;
+    }
+    if (step === "done") {
+      playEffect("success");
+      if (result) void speak(VOICE.done(result.orderNo));
+      return;
+    }
+    if (step === "error") {
+      playEffect("error");
+      void speak(VOICE.error());
+      return;
+    }
+    const line = STEP_VOICE[step];
+    if (line) void speak(line());
+  }, [step, result]);
 }
 
 function FullscreenLoader() {
