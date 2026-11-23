@@ -769,6 +769,8 @@ VOLUME_CONTROL = "MIRAEPASS Volume"
 VOLUME_DEFAULT = 80
 VOLUME_MIN_DB = -40.0
 AUDIO_AUTO = "auto"
+# 기기 테스트음: 출력이 사용 중(busy)일 때 다시 시도하며 기다리는 시간(초)
+PLAY_TEST_BUSY_WAIT = 10.0
 _audio_lock = threading.RLock()
 _CARD_LINE = re.compile(r"^\s*(\d+)\s+\[([^\]\s]+)\s*\]:\s*(\S+)\s+-\s+(.*?)\s*$")
 
@@ -893,8 +895,15 @@ def write_alsa_conf(card: str | None) -> None:
     os.replace(tmp, ALSA_CONF)
 
 
+def volume_control_id() -> str:
+    """softvol이 만든 볼륨 조절 장치를 이름 그대로 가리킨다.
+    simple mixer(sget/sset)는 이름 끝의 " Volume"을 떼어 "MIRAEPASS"로 보이게 하므로
+    sget "MIRAEPASS Volume"은 늘 실패한다. 컨트롤 이름으로 직접 찾는 cget/cset을 쓴다."""
+    return f"name={VOLUME_CONTROL}"
+
+
 def volume_control_exists(card: str) -> bool:
-    return run(["amixer", "-c", card, "sget", VOLUME_CONTROL], timeout=5).returncode == 0
+    return run(["amixer", "-c", card, "cget", volume_control_id()], timeout=5).returncode == 0
 
 
 def ensure_volume_control(card: str) -> bool:
@@ -913,7 +922,8 @@ def ensure_volume_control(card: str) -> bool:
 def apply_volume(card: str, volume: int) -> bool:
     if not ensure_volume_control(card):
         return False
-    return run(["amixer", "-q", "-c", card, "sset", VOLUME_CONTROL, f"{volume}%"], timeout=5).returncode == 0
+    # cset의 %는 원시값(0~255) 기준이라 softvol의 dB 직선(-40dB~0dB)과 그대로 맞는다 (volume_gain과 같은 곡선)
+    return run(["amixer", "-q", "-c", card, "cset", volume_control_id(), f"{volume}%"], timeout=5).returncode == 0
 
 
 def raise_hardware_levels(card: str) -> None:
@@ -1044,14 +1054,22 @@ def play_test(output: str) -> dict[str, Any]:
     volume = saved_volume()
     if volume == 0:
         raise ValueError("볼륨이 0이에요. 볼륨을 올린 뒤 다시 시도해 주세요")
-    try:
-        proc = subprocess.run(["aplay", "-q", "-D", f"default:CARD={card}", "-"], input=test_tone(volume), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15, check=False)
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("테스트음 재생이 끝나지 않았어요") from None
-    if proc.returncode != 0:
+    tone = test_tone(volume)
+    # 라즈베리파이 HDMI는 여러 프로그램이 함께 쓸 수 없다(dmix 불가). 키오스크 화면은 테스트 전에 소리 장치를 놓지만
+    # Chromium이 실제로 장치를 닫기까지 몇 초 걸리므로, 사용 중(busy)이면 잠시 기다렸다 다시 시도한다.
+    deadline = time.monotonic() + PLAY_TEST_BUSY_WAIT
+    while True:
+        try:
+            proc = subprocess.run(["aplay", "-q", "-D", f"default:CARD={card}", "-"], input=tone, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15, check=False)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("테스트음 재생이 끝나지 않았어요") from None
         detail = proc.stdout.decode("utf-8", "replace").strip()
+        if proc.returncode == 0 or "busy" not in detail.lower() or time.monotonic() >= deadline:
+            break
+        time.sleep(0.5)
+    if proc.returncode != 0:
         if "busy" in detail.lower():
-            raise RuntimeError("키오스크 화면이 이 출력을 쓰고 있어 기기 테스트음을 낼 수 없어요. ‘화면에서 재생’으로 확인해 주세요")
+            raise RuntimeError("키오스크 화면이 이 출력을 쓰고 있어 기기 테스트음을 낼 수 없어요. 잠시 뒤 다시 시도하거나 ‘화면에서 재생’으로 확인해 주세요")
         lines = [line for line in detail.splitlines() if line.strip()]
         raise RuntimeError(f"테스트음을 재생하지 못했어요: {lines[-1]}" if lines else "테스트음을 재생하지 못했어요")
     return {"ok": True, "output": card}

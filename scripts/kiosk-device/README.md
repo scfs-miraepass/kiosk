@@ -184,7 +184,7 @@ journalctl -u miraepass-kiosk-control -f
 nmcli device status                          # 네트워크 상태 확인
 cat /proc/asound/cards                       # 사운드 카드 (HDMI: vc4hdmi0·vc4hdmi1)
 aplay -D miraepass /usr/share/sounds/alsa/Front_Center.wav   # 키오스크 출력으로 소리 확인
-amixer -c vc4hdmi0 sget 'MIRAEPASS Volume'   # 볼륨 확인
+amixer -c vc4hdmi0 cget name='MIRAEPASS Volume'   # 볼륨 확인 (sget은 ' Volume'이 떼어진 'MIRAEPASS'로만 찾아짐)
 ```
 
 ### 소리 (HDMI 모니터 스피커)
