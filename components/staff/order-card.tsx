@@ -64,7 +64,7 @@ export function OrderCard({
       <ul className="my-3 space-y-1.5 border-y border-dashed py-3">
         {order.items.map((i) => (
           <li key={i.id} className="flex gap-2">
-            <span className="min-w-7 rounded-md bg-primary/10 text-center font-bold text-primary tabular-nums">{i.quantity}</span>
+            <span className="min-w-7 rounded-md bg-primary/10 text-center font-bold text-primary tabular-nums flex justify-center items-center">{i.quantity}</span>
             <span className="min-w-0">
               <span className="font-semibold">{i.name}</span>
               {i.options.length > 0 && (
