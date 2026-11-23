@@ -15,7 +15,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     callTeacher: "{name} 선생님, 주문하신 음료가 나왔습니다.",
     rate: 1,
   },
-  kiosk: { idleSeconds: 60, doneSeconds: 10, shufflePinPad: true },
+  kiosk: { idleSeconds: 60, doneSeconds: 10, shufflePinPad: true, soundEffects: true, voiceGuide: true },
 };
 
 export function getSettings(): AppSettings {
