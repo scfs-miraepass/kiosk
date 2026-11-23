@@ -25,6 +25,9 @@ const Body = z.object({
       idleSeconds: z.number().int().min(15).max(600),
       doneSeconds: z.number().int().min(3).max(60),
       shufflePinPad: z.boolean(),
+      // 이 설정이 생기기 전 화면에서 저장해도 되도록 생략 가능 (빠지면 켜짐)
+      soundEffects: z.boolean().default(true),
+      voiceGuide: z.boolean().default(true),
     })
     .optional(),
 });

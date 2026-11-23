@@ -139,6 +139,39 @@ export type DisplayStatus = {
   scale: number;
 };
 
+export type AudioOutput = {
+  /** ALSA 카드 이름 (예: vc4hdmi0, Headphones) */
+  id: string;
+  label: string;
+  kind: "hdmi" | "headphones" | "usb" | "other";
+  /** HDMI 모니터 연결 여부. 알 수 없으면 null */
+  connected: boolean | null;
+};
+
+export type AudioStatus = {
+  /** alsa-utils(aplay·amixer)가 설치돼 있는지 */
+  available: boolean;
+  /** Chromium이 쓰는 ALSA 장치(miraepass)가 준비됐는지 */
+  configured: boolean;
+  /** 저장된 출력: "auto"(연결된 HDMI 우선) 또는 카드 이름 */
+  output: string;
+  /** 지금 실제로 쓰는 카드. 장치가 없으면 null */
+  active: string | null;
+  /** 저장된 출력이 빠져 있어(예: USB 스피커 분리) 다른 출력을 쓰는 중 */
+  missing: boolean;
+  outputs: AudioOutput[];
+  /** 0~100 */
+  volume: number;
+  /** 볼륨 조절 장치(softvol)가 만들어졌는지 */
+  volumeControl: boolean;
+  /** 동작 중인 사운드 서버(pipewire·pulseaudio). 있으면 Chromium이 그쪽으로 소리를 낼 수 있다 */
+  soundServer: string | null;
+  /** 출력 변경 응답: 키오스크 화면을 다시 시작하는지 */
+  restarting?: boolean;
+  /** 볼륨 변경 응답: 바로 적용됐는지 */
+  applied?: boolean;
+};
+
 export type SecurityStatus = {
   ssh: { installed: boolean; enabled: boolean; ports: number[] };
   firewall: { available: boolean; enabled: boolean; active: boolean; sshPorts: number[]; others: string[] };

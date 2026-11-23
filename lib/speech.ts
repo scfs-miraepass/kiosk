@@ -29,6 +29,11 @@ export function hasKoreanVoice() {
   return !!(koVoice ?? pickVoice());
 }
 
+/** 고른 한국어 음성 (없으면 null) */
+export function koreanVoice() {
+  return koVoice ?? pickVoice();
+}
+
 /** WebAudio로 만든 2음 알림음 (외부 파일 불필요) */
 export function playChime(): Promise<void> {
   return new Promise((resolve) => {

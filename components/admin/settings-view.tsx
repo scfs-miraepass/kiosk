@@ -179,6 +179,22 @@ function SettingsForm({ initial, kioskToken }: { initial: AppSettings; kioskToke
             </span>
             <Switch checked={s.kiosk.shufflePinPad} onCheckedChange={(v) => setS({ ...s, kiosk: { ...s.kiosk, shufflePinPad: v } })} />
           </label>
+          <label className="flex items-center justify-between">
+            <span>
+              <span className="block text-sm font-semibold">효과음</span>
+              <span className="block text-xs text-muted-foreground">버튼을 누를 때, 메뉴를 담거나 뺄 때, 주문 완료·오류 때 소리를 내요</span>
+            </span>
+            <Switch checked={s.kiosk.soundEffects} onCheckedChange={(v) => setS({ ...s, kiosk: { ...s.kiosk, soundEffects: v } })} />
+          </label>
+          <label className="flex items-center justify-between">
+            <span>
+              <span className="block text-sm font-semibold">음성 안내</span>
+              <span className="block text-xs text-muted-foreground">
+                화면마다 할 일을 말해 주고, 주문이 끝나면 주문번호를 읽어 줘요. 녹음 파일(public/sounds/voice)이 있으면 그 목소리로, 없으면 기기의 한국어 음성으로 말해요
+              </span>
+            </span>
+            <Switch checked={s.kiosk.voiceGuide} onCheckedChange={(v) => setS({ ...s, kiosk: { ...s.kiosk, voiceGuide: v } })} />
+          </label>
         </CardContent>
         <CardFooter className="justify-end">
           {saveButton({ kiosk: s.kiosk })}

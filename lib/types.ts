@@ -147,6 +147,10 @@ export type KioskSettings = {
   idleSeconds: number;
   doneSeconds: number;
   shufflePinPad: boolean;
+  /** 버튼·담기·완료 효과음 */
+  soundEffects: boolean;
+  /** 화면별 음성 안내 (녹음 파일 → 브라우저 한국어 음성) */
+  voiceGuide: boolean;
 };
 
 export type ManualClosed = { closed: boolean; message: string };

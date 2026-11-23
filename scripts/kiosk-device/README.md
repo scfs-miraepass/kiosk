@@ -74,6 +74,8 @@ sudo CLOUD_URL=https://YOUR_DOMAIN/kiosk ADMIN_PIN=2580 ./install.sh
 | `WIFI_COUNTRY` | `KR` | Wi‑Fi 국가 코드. Raspberry Pi OS Lite는 이 값이 없으면 무선이 막혀 있습니다. |
 | `DISPLAY_ROTATE` | `normal` | 처음 화면 방향 `normal`·`left`·`right`·`inverted`. 설치 후에는 관리자 모드 › 화면에서 바꿀 수 있습니다. |
 | `DISPLAY_SCALE` | `1.25` | Chromium 확대·축소 비율 0.5~3 (`--force-device-scale-factor`). 설치 후에는 관리자 모드 › 화면에서 바꿀 수 있습니다. |
+| `AUDIO_OUTPUT` | `auto` | 소리 출력. `auto`는 부팅할 때 모니터가 연결된 HDMI를 고릅니다. ALSA 카드 이름(`vc4hdmi0`·`vc4hdmi1`·`Headphones` 등, `cat /proc/asound/cards`)으로 직접 지정할 수도 있습니다. 설치 후에는 관리자 모드 › 소리에서 바꿀 수 있습니다. |
+| `AUDIO_VOLUME` | `80` | 볼륨 0~100. 설치 후에는 관리자 모드 › 소리에서 바꿀 수 있습니다. |
 | `HIDE_CURSOR` | `1` | `1`이면 마우스 커서를 숨깁니다 (터치 전용). |
 | `FIREWALL` | `1` | `1`이면 들어오는 연결을 모두 차단하는 방화벽을 켭니다. SSH가 켜져 있으면 SSH 포트만 허용합니다. 설치 후에는 관리자 모드 › 보안에서 켜고 끌 수 있습니다. |
 | `NM_TAKEOVER` | `0` | `1`이면 다음 부팅부터 NetworkManager로 전환합니다 (위 설명 참고). |
@@ -84,7 +86,7 @@ sudo CLOUD_URL=https://YOUR_DOMAIN/kiosk ADMIN_PIN=2580 ./install.sh
 | `SKIP_PACKAGES` | `0` | `1`이면 패키지 설치를 건너뜁니다. |
 | `REBOOT` | `0` | `1`이면 설치가 끝나고 바로 재부팅합니다. |
 
-이미 설치된 기기에서는 `install.sh`가 실행되지 않습니다. 키오스크 URL·PIN처럼 설치할 때 정한 값을 바꾸려면 아래 "다시 설치"를 따르세요. 화면 방향·비율, 방화벽, SSH, 네트워크는 관리자 모드에서 바꿀 수 있습니다.
+이미 설치된 기기에서는 `install.sh`가 실행되지 않습니다. 키오스크 URL·PIN처럼 설치할 때 정한 값을 바꾸려면 아래 "다시 설치"를 따르세요. 화면 방향·비율, 소리, 방화벽, SSH, 네트워크는 관리자 모드에서 바꿀 수 있습니다.
 
 ### 필요 패키지 (`SKIP_PACKAGES=1`로 직접 설치할 때)
 
@@ -92,6 +94,7 @@ sudo CLOUD_URL=https://YOUR_DOMAIN/kiosk ADMIN_PIN=2580 ./install.sh
 - `xrandr`, `xset`, `xinput` (회전·절전 끄기·터치 보정)
 - NetworkManager (Wi‑Fi 지원 포함), `rfkill`, `iw`
 - `python3`, CJK(한글) 글꼴
+- `alsa-utils` (`aplay`·`amixer`: 소리 출력 선택·볼륨·테스트음)
 - Chromium 또는 Google Chrome
 - (선택) `openbox`
 
@@ -113,7 +116,7 @@ sudo CLOUD_URL=https://YOUR_DOMAIN/kiosk ADMIN_PIN=2580 ./install.sh
 - 적용 전에 덮어쓸 파일(방화벽 규칙·터치 설정 포함)을 백업하고, 적용 실패·시간 초과·적용 후 로컬 서비스 무응답이면 자동으로 되돌립니다. 업데이트가 새로 만든 파일은 지웁니다.
 - 적용은 별도 서비스(`miraepass-kiosk-update.service`)가 하므로 중간에 로컬 서비스가 다시 시작돼도 계속됩니다.
 - 화면 관련 파일이 실제로 바뀐 경우에만 키오스크 화면을 다시 시작합니다.
-- 새 패키지가 필요한 업데이트는 적용하지 않고 안내합니다 (삭제 후 다시 설치).
+- 새 패키지가 필요한 업데이트는 적용하지 않고 안내합니다 (삭제 후 다시 설치). 단, 소리 설정용 `alsa-utils`는 업데이트할 때 자동으로 설치를 시도하고, 실패해도 업데이트는 계속합니다 (볼륨 조절만 쓸 수 없음).
 - 다른 저장소(포크 등)에서 받으려면 처음 설치할 때 `UPDATE_REPO=owner/repo`를 지정합니다.
 
 기록: `/var/lib/miraepass/update/update.log`, `journalctl -u miraepass-kiosk-update`
@@ -156,6 +159,7 @@ sudo ./uninstall.sh
 - `/usr/local/bin/miraepass-kiosk-rotate`: 화면·터치 회전 스크립트 (부팅 시와 관리자 모드에서 공통 사용)
   - 터치 장치는 이름이 아니라 속성(절대 좌표 입력)으로 찾아서 마우스·터치패드는 건드리지 않습니다.
   - 저장된 방향은 `/etc/X11/xorg.conf.d/99-miraepass-touch-rotation.conf`에도 기록돼, USB 터치가 다시 연결돼도 같은 방향이 적용됩니다.
+- `/etc/alsa/conf.d/60-miraepass-kiosk.conf`: Chromium이 소리를 내는 ALSA 장치 `miraepass` (고른 출력 + 소프트웨어 볼륨 `MIRAEPASS Volume`). 로컬 서비스가 시작할 때마다(부팅 포함) 다시 만들고, Chromium은 `--alsa-output-device=miraepass`로 실행됩니다. `/etc/asound.conf`는 건드리지 않습니다.
 - Chromium·Chrome 정책(`/etc/chromium/policies/managed`, `/etc/chromium-browser/policies/managed`, `/etc/opt/chrome/policies/managed`): 비밀번호 저장·번역 말풍선을 끄고, 클라우드 페이지가 `127.0.0.1` 로컬 서비스를 부를 때 권한 팝업이 뜨지 않게 허용
 
 Chromium은 먼저 로컬 시작 화면(`http://127.0.0.1:8765/launch`, 파일: `/usr/local/share/miraepass-kiosk/launch.html`)을 열고, 클라우드 키오스크 주소에 연결되면 그 페이지로 이동합니다.
@@ -178,7 +182,19 @@ sudo systemctl restart miraepass-kiosk-control  # 로컬 서비스 다시 시작
 journalctl -u miraepass-kiosk -f
 journalctl -u miraepass-kiosk-control -f
 nmcli device status                          # 네트워크 상태 확인
+cat /proc/asound/cards                       # 사운드 카드 (HDMI: vc4hdmi0·vc4hdmi1)
+aplay -D miraepass /usr/share/sounds/alsa/Front_Center.wav   # 키오스크 출력으로 소리 확인
+amixer -c vc4hdmi0 sget 'MIRAEPASS Volume'   # 볼륨 확인
 ```
+
+### 소리 (HDMI 모니터 스피커)
+
+사운드 서버(PulseAudio·PipeWire) 없이 ALSA로 바로 냅니다. 기본값(`AUDIO_OUTPUT=auto`)이면 부팅할 때 모니터가 연결된 HDMI로 소리를 내므로, 보통은 따로 설정할 필요가 없습니다.
+
+- 라즈베리파이 HDMI 소리는 KMS 드라이버가 만듭니다. `/boot/firmware/config.txt`의 `dtoverlay=vc4-kms-v3d`에 `noaudio`가 붙어 있으면 HDMI 소리 장치가 생기지 않습니다 (설치 스크립트가 경고합니다).
+- HDMI 소리 장치는 부팅할 때 모니터가 알려 주는 정보(EDID)로 생깁니다. 모니터를 끈 채로 부팅했거나 DVI 변환 젠더를 쓰면 소리가 안 날 수 있습니다. 모니터를 켜고 재부팅해 보세요.
+- 라즈베리파이 4는 HDMI 포트가 두 개(`vc4hdmi0`·`vc4hdmi1`)이고 3.5mm 잭(`Headphones`)도 있습니다. 소리가 다른 곳으로 나가면 관리자 모드 › 소리에서 장치별 ‘테스트’로 확인한 뒤 고르세요.
+- 모니터 자체 볼륨·음소거도 확인하세요. HDMI는 기기에 하드웨어 볼륨이 없어 소프트웨어 볼륨으로 조절합니다.
 
 ## 관리자 모드
 
@@ -190,6 +206,7 @@ nmcli device status                          # 네트워크 상태 확인
 | 유선 LAN | 현재 IP·게이트웨이·DNS 확인, DHCP 자동 / 고정 IP(IP, 서브넷 마스크, 게이트웨이, DNS) |
 | Wi‑Fi | 신호 세기(막대·%·dBm·대역·속도, 5초마다 갱신, 약하면 경고), 주변 네트워크 검색, WPA-Personal / WPA-Enterprise(PEAP·MSCHAPv2) 연결, 숨겨진 네트워크 직접 입력 |
 | 화면 | 화면 방향(기본·오른쪽 90°·왼쪽 90°·180°) 변경. 터치 좌표도 함께 돌리며, 15초 안에 ‘유지’를 누르지 않으면 자동으로 되돌아감. 화면 비율(80~200%, 기본 125%) 변경: 키오스크 화면이 다시 시작되며 적용 |
+| 소리 | 출력 장치 선택(자동·HDMI 0/1·3.5mm 이어폰 잭·USB 오디오, HDMI는 모니터 연결 여부 표시), 장치별 테스트음, 볼륨(0~100%, 바로 적용), ‘화면에서 재생’으로 주문 화면과 같은 경로 확인. 출력 장치를 바꾸면 키오스크 화면이 다시 시작되며 적용 |
 | 업데이트 | GitHub 최신 릴리스 확인, 업데이트 적용(진행 상황 표시), 자동 업데이트 켜기/끄기, 최근 기록 |
 | 보안 | 방화벽 켜기/끄기, SSH 원격 접속 켜기/끄기. 방화벽이 켜진 상태에서 SSH를 켜면 SSH 포트만 자동으로 열림 |
 | 기기 토큰 | 키오스크 기기 토큰 재등록 (서버에서 확인된 토큰만 저장) |

@@ -22,6 +22,8 @@
 #   DISPLAY_ROTATE  화면 회전: normal | left | right | inverted (기본: normal). 터치 좌표도 같이 돌린다.
 #   DISPLAY_SCALE   Chromium 확대·축소 비율 0.5~3 (기본: 1.25). 관리자 모드 › 화면에서 바꿀 수 있다.
 #   HIDE_CURSOR     1이면 마우스 커서를 숨긴다 (기본: 1, 터치 전용 기기)
+#   AUDIO_OUTPUT    소리 출력: auto(연결된 HDMI 우선) 또는 ALSA 카드 이름(예: vc4hdmi0, Headphones) (기본: auto)
+#   AUDIO_VOLUME    볼륨 0~100 (기본: 80). 출력·볼륨은 관리자 모드 › 소리에서 바꿀 수 있다.
 #   FIREWALL        1이면 들어오는 연결을 모두 차단하는 방화벽을 켠다 (기본: 1).
 #                   SSH가 켜져 있으면 SSH 포트는 허용된다. 관리자 모드 › 보안에서 켜고 끌 수 있다.
 #   AUTO_UPDATE     1이면 매일 새벽 자동 업데이트 (기본: 1). 관리자 모드 › 업데이트에서 켜고 끌 수 있다.
@@ -61,6 +63,21 @@ die() {
 warn() { echo "    (경고) $*" >&2; }
 # Chromium 확대·축소 비율: 0.5~3, 소수 둘째 자리까지
 valid_scale() { [[ "$1" =~ ^[0-9](\.[0-9]{1,2})?$ ]] && awk -v s="$1" 'BEGIN { exit !(s >= 0.5 && s <= 3) }'; }
+# 소리 출력(auto 또는 ALSA 카드 이름)과 볼륨(0~100)
+valid_audio_output() { [[ "$1" =~ ^[A-Za-z0-9_-]{1,32}$ ]]; }
+valid_volume() { [[ "$1" =~ ^[0-9]{1,3}$ ]] && (( 10#$1 <= 100 )); }
+# 라즈베리파이 HDMI 소리는 KMS 드라이버(vc4-kms-v3d)가 만든다. noaudio 옵션이 있으면 HDMI 소리 장치가 생기지 않는다.
+check_rpi_hdmi_audio() {
+  [[ "${IS_RPI}" == "1" ]] || return 0
+  local cfg
+  for cfg in /boot/firmware/config.txt /boot/config.txt; do
+    [[ -f "${cfg}" ]] || continue
+    if grep -E '^\s*dtoverlay=vc4-(f)?kms-v3d' "${cfg}" | grep -q noaudio; then
+      warn "${cfg}의 vc4-kms-v3d에 noaudio가 있어 HDMI로 소리가 나지 않습니다. noaudio를 지우고 재부팅하세요."
+    fi
+    return 0
+  done
+}
 
 command -v systemctl >/dev/null 2>&1 || die "systemd가 필요합니다."
 
@@ -123,6 +140,8 @@ DISPLAY_SCALE="${DISPLAY_SCALE:-1.25}"
 HIDE_CURSOR="${HIDE_CURSOR:-1}"
 FIREWALL="${FIREWALL:-1}"
 NM_TAKEOVER="${NM_TAKEOVER:-0}"
+AUDIO_OUTPUT="${AUDIO_OUTPUT:-auto}"
+AUDIO_VOLUME="${AUDIO_VOLUME:-80}"
 
 CLOUD_URL="${CLOUD_URL:-}"
 if [[ -z "${CLOUD_URL}" && -t 0 ]]; then
@@ -143,6 +162,8 @@ case "${DISPLAY_ROTATE}" in
 esac
 valid_scale "${DISPLAY_SCALE}" || die "DISPLAY_SCALE은 0.5~3 사이 숫자여야 합니다 (예: 1.25)."
 [[ "${FIREWALL}" =~ ^[01]$ ]] || die "FIREWALL은 0 또는 1이어야 합니다."
+valid_audio_output "${AUDIO_OUTPUT}" || die "AUDIO_OUTPUT은 auto 또는 ALSA 카드 이름(영문·숫자·_·-)이어야 합니다 (예: vc4hdmi0)."
+valid_volume "${AUDIO_VOLUME}" || die "AUDIO_VOLUME은 0~100 사이 정수여야 합니다."
 [[ "${WIFI_COUNTRY}" =~ ^[A-Z]{2}$ ]] || die "WIFI_COUNTRY는 대문자 두 글자 국가 코드여야 합니다 (예: KR)."
 
 id "${KIOSK_USER}" >/dev/null 2>&1 || die "사용자 ${KIOSK_USER}를 찾을 수 없습니다. KIOSK_USER=... 로 지정하세요."
@@ -189,6 +210,7 @@ echo "    패키지 관리자: ${PKG} · 네트워크: ${NET_MANAGER}"
 echo "    사용자: ${KIOSK_USER} (${KIOSK_HOME})"
 echo "    키오스크 URL: ${CLOUD_URL}"
 echo "    Wi‑Fi 국가: ${WIFI_COUNTRY} · 화면 회전: ${DISPLAY_ROTATE} · 화면 비율: ${DISPLAY_SCALE} · 커서 숨김: ${HIDE_CURSOR} · 방화벽: ${FIREWALL}"
+echo "    소리 출력: ${AUDIO_OUTPUT} · 볼륨: ${AUDIO_VOLUME}"
 
 # ───────────────────────── 패키지 ─────────────────────────
 
@@ -238,6 +260,7 @@ install_apt() {
     xserver-xorg ${xwrapper_pkg} xserver-xorg-input-libinput xinit openbox dbus-x11 \
     x11-xserver-utils xinput \
     network-manager rfkill iw nftables python3 ca-certificates fonts-noto-cjk \
+    alsa-utils \
     ${browser_pkg}
   local rc=$?
   set -e
@@ -251,6 +274,7 @@ install_dnf() {
   # 배포판/버전마다 이름이 다른 패키지는 하나씩 시도한다
   dnf install -y xrandr xset xinput || dnf install -y xorg-x11-server-utils xinput || warn "xrandr/xset/xinput 설치 실패"
   dnf install -y openbox dbus-x11 || warn "openbox 설치 실패 (창 관리자 없이 실행합니다)"
+  dnf install -y alsa-utils || warn "alsa-utils 설치 실패 (소리 설정을 쓸 수 없습니다)"
   dnf install -y google-noto-sans-cjk-fonts || dnf install -y google-noto-sans-cjk-ttc-fonts || warn "한글 글꼴 설치 실패"
   if ! find_browser >/dev/null; then
     dnf install -y chromium || die "Chromium 설치에 실패했습니다. (RHEL 계열은 EPEL이 필요합니다)"
@@ -262,7 +286,7 @@ install_pacman() {
   find_browser >/dev/null || browser_pkg="chromium"
   pacman -Syu --needed --noconfirm \
     xorg-server xorg-xinit xf86-input-libinput xorg-xrandr xorg-xset xorg-xinput openbox \
-    networkmanager util-linux iw nftables python ca-certificates noto-fonts-cjk \
+    networkmanager util-linux iw nftables python ca-certificates noto-fonts-cjk alsa-utils \
     ${browser_pkg}
 }
 
@@ -355,7 +379,8 @@ record_state KIOSK_USER "${KIOSK_USER}"
 # ───────────────────────── 시스템 설정 ─────────────────────────
 
 echo "==> 사용자 권한 / Xorg 설정"
-for group in video input render tty; do
+# audio: Chromium이 ALSA 사운드 장치(/dev/snd)를 직접 연다
+for group in video input render tty audio; do
   if getent group "${group}" >/dev/null; then
     usermod -aG "${group}" "${KIOSK_USER}"
   fi
@@ -380,6 +405,8 @@ if [[ "${NET_MANAGER}" == "networkmanager" ]]; then
   nmcli radio wifi on 2>/dev/null || true
 fi
 
+check_rpi_hdmi_audio
+
 # 라즈베리파이는 RTC가 없어 시간 동기화가 꺼져 있으면 시간이 틀어지고, HTTPS(클라우드 화면·GitHub 업데이트)가 인증서 오류로 실패한다
 if command -v timedatectl >/dev/null 2>&1; then
   timedatectl set-ntp true 2>/dev/null || warn "시간 자동 동기화(NTP)를 켜지 못했습니다. 시간 동기화 서비스(systemd-timesyncd·chrony 등)를 설치해 주세요."
@@ -394,6 +421,8 @@ CLOUD_URL="$(conf /etc/default/miraepass-kiosk KIOSK_URL)"
 DISPLAY_ROTATE="$(conf /etc/default/miraepass-kiosk DISPLAY_ROTATE)"
 DISPLAY_SCALE="$(conf /etc/default/miraepass-kiosk DISPLAY_SCALE)"
 CHROMIUM_EXTRA_FLAGS="$(conf /etc/default/miraepass-kiosk CHROMIUM_EXTRA_FLAGS)"
+AUDIO_OUTPUT="$(conf /etc/default/miraepass-kiosk AUDIO_OUTPUT)"
+AUDIO_VOLUME="$(conf /etc/default/miraepass-kiosk AUDIO_VOLUME)"
 ADMIN_PIN="$(conf /etc/default/miraepass-kiosk-control MIRAEPASS_KIOSK_ADMIN_PIN)"
 KIOSK_USER="$(conf "${STATE_FILE}" KIOSK_USER)"
 HIDE_CURSOR=0
@@ -401,6 +430,8 @@ grep -q -- "-nocursor" /etc/systemd/system/miraepass-kiosk.service 2>/dev/null &
 DISPLAY_ROTATE="${DISPLAY_ROTATE:-normal}"
 # 이 설정이 생기기 전에 설치된 기기는 값이 없으므로 기본값을 쓴다
 valid_scale "${DISPLAY_SCALE}" || DISPLAY_SCALE=1.25
+valid_audio_output "${AUDIO_OUTPUT}" || AUDIO_OUTPUT=auto
+valid_volume "${AUDIO_VOLUME}" || AUDIO_VOLUME=80
 NEED_REBOOT=0
 
 [[ -n "${CLOUD_URL}" && -n "${ADMIN_PIN}" && -n "${KIOSK_USER}" ]] || die "기존 설정을 읽지 못했습니다. 삭제 후 다시 설치해 주세요."
@@ -413,6 +444,27 @@ done
 echo "==> 업데이트 (설정 유지)"
 echo "    기기: ${DEVICE_MODEL} · ${OS_NAME}"
 echo "    사용자: ${KIOSK_USER} · 키오스크 URL: ${CLOUD_URL}"
+
+# 소리 설정이 생기기 전에 설치된 기기: alsa-utils(볼륨 조절·테스트음)와 audio 그룹을 채운다. 실패해도 업데이트는 계속한다.
+if ! command -v amixer >/dev/null 2>&1 || ! command -v aplay >/dev/null 2>&1; then
+  echo "==> 소리 도구(alsa-utils) 설치"
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends alsa-utils >/dev/null 2>&1 \
+      || { apt-get update >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends alsa-utils >/dev/null 2>&1; } \
+      || warn "alsa-utils를 설치하지 못했습니다. 관리자 모드 › 소리의 볼륨 조절을 쓰려면 직접 설치해 주세요."
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y alsa-utils >/dev/null 2>&1 || warn "alsa-utils를 설치하지 못했습니다."
+  elif command -v pacman >/dev/null 2>&1; then
+    pacman -S --needed --noconfirm alsa-utils >/dev/null 2>&1 || warn "alsa-utils를 설치하지 못했습니다."
+  else
+    warn "alsa-utils(amixer·aplay)가 없어 볼륨 조절을 쓸 수 없습니다."
+  fi
+fi
+AUDIO_GROUP_ADDED=0
+if getent group audio >/dev/null && ! id -nG "${KIOSK_USER}" | tr ' ' '\n' | grep -qx audio; then
+  usermod -aG audio "${KIOSK_USER}" && AUDIO_GROUP_ADDED=1
+fi
+check_rpi_hdmi_audio
 
 # 바뀌었을 때만 키오스크 화면을 다시 시작하려고, 화면에 영향을 주는 파일의 지금 상태를 기억해 둔다
 SCREEN_FILES=(
@@ -508,7 +560,7 @@ mkdir -p /etc/default
 # 사용자가 직접 추가한 줄(예: MIRAEPASS_KIOSK_ALLOWED_ORIGINS)은 업데이트해도 남긴다
 keep_extra() { grep -v -E "^($2)=" "$1" 2>/dev/null | grep -v -E '^\s*(#|$)' || true; }
 EXTRA_CONTROL_ENV="$(keep_extra /etc/default/miraepass-kiosk-control 'MIRAEPASS_KIOSK_(ADMIN_PIN|ALLOW_POWER|URL|VERSION|VERSION_LEGACY|UPDATE_REPO|USER|ENV_FILE|ROTATE_BIN)')"
-EXTRA_KIOSK_ENV="$(keep_extra /etc/default/miraepass-kiosk 'KIOSK_URL|DISPLAY_ROTATE|DISPLAY_SCALE|CHROMIUM_EXTRA_FLAGS')"
+EXTRA_KIOSK_ENV="$(keep_extra /etc/default/miraepass-kiosk 'KIOSK_URL|DISPLAY_ROTATE|DISPLAY_SCALE|CHROMIUM_EXTRA_FLAGS|AUDIO_OUTPUT|AUDIO_VOLUME')"
 cat >/etc/default/miraepass-kiosk-control <<DEFAULT
 MIRAEPASS_KIOSK_ADMIN_PIN=${ADMIN_PIN}
 MIRAEPASS_KIOSK_ALLOW_POWER=1
@@ -661,6 +713,12 @@ for _ in $(seq 1 40); do
   sleep 0.5
 done
 
+# 소리: 로컬 서비스가 만든 ALSA 장치(miraepass: 고른 출력 + 볼륨)로 낸다. 없으면 시스템 기본 장치.
+AUDIO_FLAG=""
+if command -v aplay >/dev/null 2>&1 && aplay -L 2>/dev/null | grep -qx miraepass; then
+  AUDIO_FLAG="--alsa-output-device=miraepass"
+fi
+
 CHROME=""
 for c in chromium chromium-browser google-chrome-stable google-chrome; do
   CHROME="$(command -v "${c}" 2>/dev/null)" && break
@@ -688,6 +746,7 @@ exec "${CHROME}" \
   --check-for-update-interval=31536000 \
   --autoplay-policy=no-user-gesture-required \
   --force-device-scale-factor="${SCALE}" \
+  ${AUDIO_FLAG} \
   ${CHROMIUM_EXTRA_FLAGS:-} \
   "${START_URL}"
 SESSION
@@ -703,6 +762,8 @@ cat >/etc/default/miraepass-kiosk <<DEFAULT
 KIOSK_URL=${CLOUD_URL}
 DISPLAY_ROTATE=${DISPLAY_ROTATE}
 DISPLAY_SCALE=${DISPLAY_SCALE}
+AUDIO_OUTPUT=${AUDIO_OUTPUT}
+AUDIO_VOLUME=${AUDIO_VOLUME}
 CHROMIUM_EXTRA_FLAGS="${CHROMIUM_EXTRA_FLAGS}"
 DEFAULT
 [[ -n "${EXTRA_KIOSK_ENV}" ]] && echo "${EXTRA_KIOSK_ENV}" >>/etc/default/miraepass-kiosk
@@ -786,7 +847,8 @@ else
   if [[ "${UPDATE_TIMER_EXISTED}" == "0" && "${AUTO_UPDATE:-1}" == "1" ]]; then
     systemctl enable --now miraepass-kiosk-update.timer >/dev/null && echo "==> 자동 업데이트 켬 (매일 새벽 3:30 전후)"
   fi
-  if [[ "$(screen_digest)" != "${SCREEN_BEFORE}" ]] && systemctl is-active --quiet miraepass-kiosk.service; then
+  # audio 그룹이 새로 생겼으면 키오스크 세션을 다시 열어야 Chromium이 사운드 장치를 쓸 수 있다
+  if { [[ "$(screen_digest)" != "${SCREEN_BEFORE}" ]] || [[ "${AUDIO_GROUP_ADDED}" == "1" ]]; } && systemctl is-active --quiet miraepass-kiosk.service; then
     echo "==> 화면 관련 파일이 바뀌어 키오스크 화면을 다시 시작합니다"
     systemctl restart miraepass-kiosk.service || warn "키오스크 화면을 다시 시작하지 못했습니다"
   fi
