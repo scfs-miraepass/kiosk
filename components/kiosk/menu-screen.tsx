@@ -12,6 +12,7 @@ import { activeCategoryAtom, addToCartAtom, cartCountAtom, cartTotalAtom, stepAt
 import { CartList } from "./cart-list";
 import { MenuCard } from "./menu-card";
 import { OptionDialog } from "./option-dialog";
+import { SchoolLogo } from "./school-logo";
 import { KIOSK_OVERLAY } from "./styles";
 
 export function MenuScreen({
@@ -48,8 +49,8 @@ export function MenuScreen({
       {/* 카테고리: 세로(가로 태블릿) / 가로 스크롤(세로 태블릿·모바일) */}
       <nav className="flex shrink-0 flex-col bg-white lg:h-dvh lg:border-r">
         <div className="flex items-center justify-between gap-3 px-4 pt-4 lg:flex-col lg:px-3 lg:pt-6">
-          <button {...logoLongPress} onClick={onHome} className="flex touch-none items-center gap-2" aria-label="처음으로">
-            <img src="/favicon.svg" alt="" className="h-8 lg:h-10" />
+          <button {...logoLongPress} onClick={onHome} className="flex min-h-12 min-w-12 touch-none items-center justify-center gap-2" aria-label="처음으로">
+            <SchoolLogo className="h-8 w-auto lg:h-10" />
             <span className="text-lg font-extrabold lg:hidden">미래카페</span>
           </button>
           <span className="text-sm text-muted-foreground lg:hidden">MIRAEPASS 결제</span>

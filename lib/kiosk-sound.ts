@@ -106,17 +106,61 @@ export function configureKioskSound(next: { effects: boolean; voice: boolean }) 
 
 // ───────────────────────── 효과음 ─────────────────────────
 
+/**
+ * 화면 전체가 함께 쓰는 AudioContext 하나.
+ * 라즈베리파이 HDMI(ALSA)는 한 번에 한 스트림만 열 수 있어서, AudioContext를 하나 더 만들면
+ * 두 번째 것은 장치를 못 열고 소리 없이 재생된다. 효과음·음성 안내·관리자 테스트음 모두 이것을 쓴다.
+ */
 let ctx: AudioContext | null = null;
 
 function audio(): AudioContext | null {
   if (typeof window === "undefined" || typeof AudioContext === "undefined") return null;
   try {
-    ctx ??= new AudioContext();
+    if (!ctx || ctx.state === "closed") ctx = new AudioContext();
     if (ctx.state === "suspended") void ctx.resume();
     return ctx;
   } catch {
     return null;
   }
+}
+
+/**
+ * 소리 장치를 놓는다. 기기(aplay)가 같은 출력으로 직접 테스트음을 내려면 Chromium이 장치를 닫아야 한다.
+ * 다음 효과음·안내 때 새로 연다. 받아 둔 녹음 파일(AudioBuffer)은 새 컨텍스트에서도 그대로 쓴다.
+ */
+export async function releaseAudio() {
+  stopVoice();
+  const current = ctx;
+  ctx = null;
+  if (current && current.state !== "closed") await current.close().catch(() => {});
+}
+
+/** 관리자 모드 › 소리 › '화면에서 재생': 주문 화면과 같은 컨텍스트·출력·볼륨으로 '삐-삐'를 낸다 (효과음 꺼짐과 상관없이) */
+export async function playTestBeep() {
+  const ac = audio();
+  if (!ac) throw new Error("이 브라우저는 소리 재생을 지원하지 않아요");
+  await ac.resume();
+  const gain = ac.createGain();
+  gain.gain.value = 0;
+  gain.connect(ac.destination);
+  const t = ac.currentTime + 0.05;
+  for (const [freq, start, length] of [
+    [880, 0, 0.25],
+    [1320, 0.37, 0.35],
+  ] as const) {
+    const osc = ac.createOscillator();
+    osc.frequency.value = freq;
+    osc.connect(gain);
+    // 앞뒤를 부드럽게 올리고 내려 '딱' 소리를 없앤다
+    gain.gain.setValueAtTime(0, t + start);
+    gain.gain.linearRampToValueAtTime(0.5, t + start + 0.01);
+    gain.gain.setValueAtTime(0.5, t + start + length - 0.01);
+    gain.gain.linearRampToValueAtTime(0, t + start + length);
+    osc.start(t + start);
+    osc.stop(t + start + length);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  gain.disconnect();
 }
 
 type Note = { freq: number; at: number; length: number; gain: number; type?: OscillatorType };
@@ -223,6 +267,8 @@ function loadClip(name: string): Promise<Clip | null> {
         const buffer = await ac.decodeAudioData(data);
         return { buffer, ...voicedRange(buffer.getChannelData(0), buffer.sampleRate) };
       } catch {
+        // 받는 사이 소리 장치를 놓아(releaseAudio) 컨텍스트가 닫혔으면 다음에 다시 받는다
+        if (ac.state === "closed") clipCache.delete(name);
         return null;
       }
     })();
@@ -231,9 +277,29 @@ function loadClip(name: string): Promise<Clip | null> {
   return cached;
 }
 
-/** 키오스크가 켜질 때 녹음 파일을 미리 받아 둔다 (첫 안내가 늦지 않게) */
+/** 화면이 다 뜬 뒤 미리 받기 시작할 때까지 더 기다리는 시간 */
+const PRELOAD_DELAY_MS = 3000;
+let preloading = false;
+
+/**
+ * 녹음 파일을 미리 받아 둔다 (첫 안내가 늦지 않게).
+ * 화면(이미지·글꼴)이 다 뜬 뒤, 한 번에 하나씩 받는다. 한꺼번에 받으면 브라우저 연결(서버당 6개)을 음성 파일이
+ * 모두 차지해 로고·메뉴 사진·글꼴이 뒤로 밀리고, 느린 망에서는 다 받을 때까지 화면이 비어 보인다.
+ * 미리 받기 전에 안내가 나와야 하면 speak()가 필요한 파일만 바로 받는다.
+ */
 export function preloadVoice() {
-  for (const name of Object.keys(VOICE_CLIPS)) void loadClip(name);
+  if (preloading || typeof window === "undefined") return;
+  preloading = true;
+  const run = async () => {
+    for (const name of Object.keys(VOICE_CLIPS)) {
+      if (!enabled.voice) break;
+      await loadClip(name);
+    }
+    preloading = false;
+  };
+  const start = () => setTimeout(() => void run(), PRELOAD_DELAY_MS);
+  if (document.readyState === "complete") start();
+  else window.addEventListener("load", start, { once: true });
 }
 
 let generation = 0;

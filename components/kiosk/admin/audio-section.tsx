@@ -3,6 +3,7 @@
 import { Headphones, Loader2, Minus, Monitor, Play, Plus, RefreshCw, Sparkles, Speaker, Usb, Volume2, VolumeX } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { playTestBeep, releaseAudio } from "@/lib/kiosk-sound";
 import { cn } from "@/lib/utils";
 import { BigButton, Card, Notice, type NoticeState, SectionHeader, StatusDot } from "./admin-ui";
 import { type AudioOutput, type AudioStatus, errorMessage, localApi } from "./local-api";
@@ -18,37 +19,6 @@ const KIND_ICON: Record<AudioOutput["kind"], React.ReactNode> = {
   usb: <Usb className="size-6" />,
   other: <Speaker className="size-6" />,
 };
-
-/** 키오스크 화면(Chromium)에서 직접 '삐-삐'를 낸다. 실제 주문 화면과 같은 경로(출력·볼륨)로 나오는지 확인하는 용도. */
-async function playBrowserBeep() {
-  const AudioCtx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!AudioCtx) throw new Error("이 브라우저는 소리 재생을 지원하지 않아요");
-  const ctx = new AudioCtx();
-  try {
-    await ctx.resume();
-    const gain = ctx.createGain();
-    gain.connect(ctx.destination);
-    const t = ctx.currentTime + 0.05;
-    for (const [freq, start, length] of [
-      [880, 0, 0.25],
-      [1320, 0.37, 0.35],
-    ] as const) {
-      const osc = ctx.createOscillator();
-      osc.frequency.value = freq;
-      osc.connect(gain);
-      // 앞뒤를 부드럽게 올리고 내려 '딱' 소리를 없앤다
-      gain.gain.setValueAtTime(0, t + start);
-      gain.gain.linearRampToValueAtTime(0.5, t + start + 0.01);
-      gain.gain.setValueAtTime(0.5, t + start + length - 0.01);
-      gain.gain.linearRampToValueAtTime(0, t + start + length);
-      osc.start(t + start);
-      osc.stop(t + start + length);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 900));
-  } finally {
-    void ctx.close();
-  }
-}
 
 /**
  * 소리 설정: 출력 장치(HDMI 모니터 스피커·이어폰 잭·USB)와 볼륨.
@@ -111,6 +81,8 @@ export function AudioSection({ disabled }: { disabled: boolean }) {
     setBusy(`test:${output}`);
     setNotice(null);
     try {
+      // 라즈베리파이 HDMI는 한 프로그램만 쓸 수 있어, 키오스크 화면이 잡고 있는 소리 장치를 먼저 놓는다
+      await releaseAudio();
       await localApi("/audio/test", { method: "POST", body: JSON.stringify({ output }), timeoutMs: 20_000 });
       setNotice({ tone: "info", text: "테스트음을 냈어요. ‘삐-삐’ 소리가 들렸는지 확인해 주세요." });
     } catch (e) {
@@ -124,7 +96,7 @@ export function AudioSection({ disabled }: { disabled: boolean }) {
     setBusy("screen");
     setNotice(null);
     try {
-      await playBrowserBeep();
+      await playTestBeep();
       setNotice({ tone: "info", text: "키오스크 화면에서 소리를 냈어요. 주문 화면의 소리도 같은 스피커·볼륨으로 나와요." });
     } catch (e) {
       setNotice({ tone: "error", text: errorMessage(e, "소리를 재생하지 못했어요") });
