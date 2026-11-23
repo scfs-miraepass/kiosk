@@ -5,6 +5,7 @@ import { memo, useEffect, useMemo, useState } from "react";
 import { Marquee } from "@/components/ui/marquee";
 import { formatPoint } from "@/lib/format";
 import type { CategoryDTO } from "@/lib/types";
+import { SchoolLogo } from "./school-logo";
 import { MenuThumb } from "./menu-thumb";
 
 /**
@@ -33,7 +34,7 @@ export const AttractScreen = memo(function AttractScreen({ menu, onStart }: { me
       <div aria-hidden className="attract-dots pointer-events-none absolute inset-0 -z-10" />
 
       <div className="flex flex-col items-center gap-6 px-6">
-        <img src="/favicon.svg" alt="" className="h-14 md:h-20" />
+        <SchoolLogo className="h-14 w-auto md:h-20" />
         <p className="text-lg font-semibold text-primary md:text-2xl">순천미래과학고 교내 카페</p>
         <div className="flex flex-col items-center text-[2.5rem] leading-tight font-extrabold tracking-tight md:text-h1 md:font-extrabold">
           <span>오늘은</span>

@@ -137,6 +137,10 @@ describe("kiosk device audio", () => {
     expect(conf).toContain("show on"); // aplay -L 에 보여야 세션 스크립트가 장치를 쓴다
   });
 
+  it("볼륨은 컨트롤 이름 그대로 찾는다 (simple mixer는 ' Volume'을 떼어 'MIRAEPASS'로 보여 sget/sset이 실패한다)", () => {
+    expect(py<string>(`m.volume_control_id()`)).toBe("name=MIRAEPASS Volume");
+  });
+
   it("테스트음 크기는 softvol과 같은 곡선을 따른다", () => {
     expect(py<number[]>(`[round(m.volume_gain(v), 3) for v in (0, 50, 100)]`)).toEqual([0, 0.1, 1]);
     // 48kHz 16비트 스테레오 0.72초 + WAV 헤더 44바이트
