@@ -7,7 +7,7 @@ import { candidateHonorific, formatPoint } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { cartTotalAtom, customerAtom, stepAtom } from "@/store/kiosk";
 import { NumericKeypad } from "./numeric-keypad";
-import { PIN_LENGTH as LENGTH, PinBoxes, PinNotice } from "./pin-parts";
+import { PIN_LENGTH as LENGTH, PinBoxes } from "./pin-parts";
 import { StepHeader } from "./step-header";
 import { useSubmitOrder } from "./use-submit-order";
 
@@ -58,13 +58,9 @@ export function PinScreen({ shuffle, onHome }: { shuffle: boolean; onHome: () =>
           <div>
             <p className="text-2xl font-bold lg:text-3xl">{candidateHonorific(customer)}</p>
             <p className="mt-1 text-lg text-muted-foreground lg:text-xl">
-              결제 비밀번호 <b className="text-foreground">숫자 6자리</b>를 눌러 주세요
+              키오스크 비밀번호 <b className="text-foreground">숫자 6자리</b>를 눌러 주세요
             </p>
           </div>
-          <PinNotice>
-            <p className="font-bold">MIRAEPASS 로그인 비밀번호가 아니에요</p>
-            <p>처음 키오스크에서 결제할 때 직접 정한 숫자 6자리예요</p>
-          </PinNotice>
           <PinBoxes value={pin} error={Boolean(error)} shakeKey={error?.at} />
 
           {/* 상태 줄: 높이를 미리 잡아 두어 안내가 바뀌어도 화면이 움직이지 않는다 */}
@@ -86,7 +82,7 @@ export function PinScreen({ shuffle, onHome }: { shuffle: boolean; onHome: () =>
             결제 금액 <span className="font-extrabold text-primary">{formatPoint(total)}</span>
           </div>
           <p className="text-base text-muted-foreground">
-            비밀번호가 기억나지 않으면 MIRAEPASS 앱에서 키오스크 비밀번호를 다시 정할 수 있어요
+              MIRAEPASS 앱에서 키오스크 비밀번호를 다시 정할 수 있어요
           </p>
         </div>
         <NumericKeypad

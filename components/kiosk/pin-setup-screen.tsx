@@ -9,7 +9,7 @@ import { candidateHonorific, formatPoint } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { cartTotalAtom, customerAtom, paymentPendingAtom, stepAtom } from "@/store/kiosk";
 import { NumericKeypad } from "./numeric-keypad";
-import { PIN_LENGTH as LENGTH, PinBoxes, PinNotice } from "./pin-parts";
+import { PIN_LENGTH as LENGTH, PinBoxes } from "./pin-parts";
 import { StepHeader } from "./step-header";
 import { useSubmitOrder } from "./use-submit-order";
 
@@ -77,7 +77,7 @@ export function PinSetupScreen({ shuffle, onHome }: { shuffle: boolean; onHome: 
       setError(null);
       return;
     }
-    if (next !== first) return restart("처음 누른 숫자와 달라요. ①부터 다시 정해 주세요");
+    if (next !== first) return restart("처음 누른 숫자와 달라요. 다시 시도해 주세요.");
     setPin(next);
     create.mutate(next);
   };
@@ -98,10 +98,6 @@ export function PinSetupScreen({ shuffle, onHome }: { shuffle: boolean; onHome: 
             <p className="text-2xl font-bold lg:text-3xl">{candidateHonorific(customer)}, 처음 오셨네요!</p>
             <p className="mt-1 text-lg text-muted-foreground lg:text-xl">결제할 때 쓸 숫자 6자리를 새로 정해 주세요</p>
           </div>
-          <PinNotice>
-            <p className="font-bold">MIRAEPASS 로그인 비밀번호를 넣는 곳이 아니에요</p>
-            <p>기억하기 쉬운 숫자 6자리를 새로 정하면, 다음 결제부터 이 숫자를 눌러요</p>
-          </PinNotice>
 
           {/* 단계 표시: 지금 처음 정하는 중인지, 확인을 위해 한 번 더 누르는 중인지 */}
           <ol className="grid w-full max-w-md grid-cols-2 gap-2" aria-label="비밀번호 만들기 단계">
@@ -159,7 +155,7 @@ export function PinSetupScreen({ shuffle, onHome }: { shuffle: boolean; onHome: 
               결제 금액 <span className="font-extrabold text-primary">{formatPoint(total)}</span>
             </div>
           </div>
-          <p className="text-base text-muted-foreground">비밀번호를 만들면 바로 결제돼요. 나중에 MIRAEPASS 앱에서 바꿀 수 있어요</p>
+          <p className="text-base text-muted-foreground">나중에 MIRAEPASS 앱에서 바꿀 수 있어요</p>
         </div>
         <NumericKeypad
           // 다시 입력할 때마다 숫자 배열을 새로 섞는다 (키패드만 바뀌고 화면은 그대로)
