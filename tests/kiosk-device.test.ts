@@ -80,3 +80,66 @@ describe("kiosk device updater", () => {
     expect(py<string[]>(`[n for n in ${JSON.stringify(names)} if m.is_bundle_file(n)]`)).toEqual(["install.sh", "launch.html"]);
   });
 });
+
+describe("kiosk device audio", () => {
+  const cards = [
+    { id: "Headphones", kind: "headphones", connected: null },
+    { id: "vc4hdmi0", kind: "hdmi", connected: false },
+    { id: "vc4hdmi1", kind: "hdmi", connected: true },
+  ];
+
+  it.each([
+    ["auto", "vc4hdmi1"], // 모니터가 연결된 HDMI 우선
+    ["vc4hdmi0", "vc4hdmi0"], // 직접 고른 출력
+    ["USB", "vc4hdmi1"], // 고른 장치가 빠져 있으면 자동으로
+  ])("resolve_output(%s) = %s", (setting, expected) => {
+    expect(py<string | null>(`m.resolve_output(${JSON.stringify(setting)}, json.loads(${JSON.stringify(JSON.stringify(cards))}))`)).toBe(expected);
+  });
+
+  it("연결 여부를 모르는 HDMI → 이어폰 잭 순으로 고르고, 장치가 없으면 None", () => {
+    const unknown = [
+      { id: "Headphones", kind: "headphones", connected: null },
+      { id: "vc4hdmi0", kind: "hdmi", connected: null },
+    ];
+    expect(py<string | null>(`m.resolve_output("auto", json.loads(${JSON.stringify(JSON.stringify(unknown))}))`)).toBe("vc4hdmi0");
+    expect(py<string | null>(`m.resolve_output("auto", [{"id": "Headphones", "kind": "headphones", "connected": None}])`)).toBe("Headphones");
+    expect(py<string | null>(`m.resolve_output("auto", [])`)).toBeNull();
+  });
+
+  it("라즈베리파이 사운드 카드를 화면용 이름으로 바꾼다", () => {
+    expect(py<Record<string, string>>(`{k: v for k, v in m.describe_card("vc4hdmi1", "vc4-hdmi", "vc4-hdmi-1").items() if k != "connected"}`)).toEqual({
+      kind: "hdmi",
+      label: "HDMI 1 (모니터 스피커)",
+    });
+    expect(py<string>(`m.describe_card("Headphones", "bcm2835_headpho", "bcm2835 Headphones")["kind"]`)).toBe("headphones");
+    expect(py<string>(`m.describe_card("Device", "USB-Audio", "USB Audio Device")["label"]`)).toBe("USB 오디오 · USB Audio Device");
+  });
+
+  it.each([
+    [80, 80],
+    ["55", 55],
+    [0, 0],
+    [100, 100],
+    [101, null],
+    [-1, null],
+    ["abc", null],
+    [true, null],
+    [null, null],
+  ])("parse_volume(%j) = %j", (value, expected) => {
+    expect(py<number | null>(`m.parse_volume(json.loads(${JSON.stringify(JSON.stringify(value))}))`)).toBe(expected);
+  });
+
+  it("Chromium이 쓰는 ALSA 장치는 고른 카드로 소프트웨어 볼륨을 거친다", () => {
+    const conf = py<string>(`m.alsa_conf("vc4hdmi0")`);
+    expect(conf).toContain("pcm.miraepass {");
+    expect(conf).toContain('slave.pcm "default:CARD=vc4hdmi0"');
+    expect(conf).toContain('name "MIRAEPASS Volume"');
+    expect(conf).toContain("show on"); // aplay -L 에 보여야 세션 스크립트가 장치를 쓴다
+  });
+
+  it("테스트음 크기는 softvol과 같은 곡선을 따른다", () => {
+    expect(py<number[]>(`[round(m.volume_gain(v), 3) for v in (0, 50, 100)]`)).toEqual([0, 0.1, 1]);
+    // 48kHz 16비트 스테레오 0.72초 + WAV 헤더 44바이트
+    expect(py<number>(`len(m.test_tone(80))`)).toBe(44 + Math.round(48000 * 0.25) * 4 + Math.round(48000 * 0.12) * 4 + Math.round(48000 * 0.35) * 4);
+  });
+});

@@ -23,7 +23,7 @@ import {
 /** Wi‑Fi 화면을 보는 동안 신호 세기를 다시 읽는 간격 */
 const WIFI_POLL_MS = 5000;
 
-export type AdminSection = "status" | "ethernet" | "wifi" | "display" | "security" | "update" | "token" | "power";
+export type AdminSection = "status" | "ethernet" | "wifi" | "display" | "audio" | "security" | "update" | "token" | "power";
 
 type NetworkProps = {
   network: NetworkStatus | null;

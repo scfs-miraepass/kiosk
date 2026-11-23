@@ -15,10 +15,13 @@ kiosk that boots without network would be stuck on Chromium's error page.
 from __future__ import annotations
 
 import base64
+import glob
 import hashlib
 import hmac
+import io
 import ipaddress
 import json
+import math
 import os
 import platform
 import re
@@ -26,6 +29,7 @@ import secrets
 import shutil
 import socket
 import ssl
+import struct
 import subprocess
 import sys
 import tempfile
@@ -34,6 +38,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlsplit
@@ -750,6 +755,308 @@ def revert_rotation() -> dict[str, Any]:
         return display_status()
 
 
+# ───────────────────────── 소리 (ALSA) ─────────────────────────
+#
+# 사운드 서버(PulseAudio·PipeWire) 없이 ALSA만 쓴다. 이 서비스가 ALSA 설정 조각을 만들어
+#   pcm.miraepass → softvol(볼륨 "MIRAEPASS Volume") → default:CARD=<고른 출력>
+# 으로 잇고, 세션 스크립트가 Chromium을 --alsa-output-device=miraepass 로 띄운다.
+# 라즈베리파이 HDMI(vc4-hdmi)는 하드웨어 볼륨이 없어 softvol로 볼륨을 조절한다.
+# 출력 장치를 바꾸면 Chromium이 ALSA 설정을 다시 읽어야 하므로 키오스크 화면을 다시 시작한다. 볼륨은 바로 적용된다.
+
+ALSA_CONF = os.environ.get("MIRAEPASS_KIOSK_ALSA_CONF", "/etc/alsa/conf.d/60-miraepass-kiosk.conf")
+ALSA_PCM = "miraepass"
+VOLUME_CONTROL = "MIRAEPASS Volume"
+VOLUME_DEFAULT = 80
+VOLUME_MIN_DB = -40.0
+AUDIO_AUTO = "auto"
+_audio_lock = threading.RLock()
+_CARD_LINE = re.compile(r"^\s*(\d+)\s+\[([^\]\s]+)\s*\]:\s*(\S+)\s+-\s+(.*?)\s*$")
+
+
+def sound_cards() -> list[dict[str, Any]]:
+    """/proc/asound/cards의 사운드 카드 목록 (화면용 이름·종류·HDMI 연결 여부 포함)."""
+    try:
+        with open("/proc/asound/cards", encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return []
+    cards: list[dict[str, Any]] = []
+    for line in lines:
+        m = _CARD_LINE.match(line)
+        if not m:
+            continue
+        card_id, driver, name = m.group(2), m.group(3), m.group(4)
+        if driver.lower() in ("loopback", "dummy"):
+            continue
+        cards.append({"id": card_id, **describe_card(card_id, driver, name)})
+    return cards
+
+
+def describe_card(card_id: str, driver: str, name: str) -> dict[str, Any]:
+    hdmi = re.fullmatch(r"vc4hdmi(\d*)", card_id) or driver.startswith("vc4-hdmi")
+    if hdmi:
+        m = re.search(r"(\d+)$", card_id)
+        port = int(m.group(1)) if m else 0
+        return {"kind": "hdmi", "label": f"HDMI {port} (모니터 스피커)", "connected": hdmi_connected(port)}
+    if card_id == "Headphones" or "headpho" in driver.lower():
+        return {"kind": "headphones", "label": "3.5mm 이어폰 잭", "connected": None}
+    if driver == "USB-Audio":
+        return {"kind": "usb", "label": f"USB 오디오 · {name}", "connected": True}
+    if "hdmi" in name.lower():
+        return {"kind": "hdmi", "label": name, "connected": None}
+    return {"kind": "other", "label": name or card_id, "connected": None}
+
+
+def hdmi_connected(port: int) -> bool | None:
+    """라즈베리파이 HDMI 포트(0부터)에 모니터가 연결돼 있는지. DRM 커넥터는 HDMI-A-1부터 시작한다. 알 수 없으면 None."""
+    paths = glob.glob(f"/sys/class/drm/card*-HDMI-A-{port + 1}/status")
+    if not paths:
+        return None
+    try:
+        with open(paths[0], encoding="utf-8") as f:
+            return f.read().strip() == "connected"
+    except OSError:
+        return None
+
+
+def resolve_output(setting: str, cards: list[dict[str, Any]]) -> str | None:
+    """저장된 출력 설정을 실제 카드로. auto(또는 저장된 카드가 빠져 있음)면 연결된 HDMI → HDMI → 첫 카드 순."""
+    ids = [c["id"] for c in cards]
+    if setting != AUDIO_AUTO and setting in ids:
+        return setting
+    for want in (lambda c: c["kind"] == "hdmi" and c["connected"] is True, lambda c: c["kind"] == "hdmi" and c["connected"] is not False, lambda c: True):
+        for card in cards:
+            if want(card):
+                return card["id"]
+    return None
+
+
+def saved_audio_output() -> str:
+    value = (_env_value("AUDIO_OUTPUT") or AUDIO_AUTO).strip()
+    return value if value == AUDIO_AUTO or re.fullmatch(r"[A-Za-z0-9_-]{1,32}", value) else AUDIO_AUTO
+
+
+def parse_volume(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        volume = round(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return volume if 0 <= volume <= 100 else None
+
+
+def saved_volume() -> int:
+    volume = parse_volume(_env_value("AUDIO_VOLUME"))
+    return VOLUME_DEFAULT if volume is None else volume
+
+
+def alsa_conf(card: str) -> str:
+    return f"""# MIRAEPASS kiosk audio — 관리자 모드 › 소리가 자동으로 만듭니다. 직접 고치지 마세요.
+# Chromium은 이 장치(--alsa-output-device={ALSA_PCM})로 소리를 냅니다. 출력: {card}
+pcm.{ALSA_PCM} {{
+    type plug
+    slave.pcm "{ALSA_PCM}_softvol"
+    hint {{
+        show on
+        description "MIRAEPASS kiosk output ({card})"
+    }}
+}}
+
+pcm.{ALSA_PCM}_softvol {{
+    type softvol
+    slave.pcm "default:CARD={card}"
+    control {{
+        name "{VOLUME_CONTROL}"
+        card "{card}"
+    }}
+    min_dB {VOLUME_MIN_DB}
+    max_dB 0.0
+}}
+"""
+
+
+def write_alsa_conf(card: str | None) -> None:
+    if card is None:
+        try:
+            os.unlink(ALSA_CONF)
+        except FileNotFoundError:
+            pass
+        return
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", card):
+        raise ValueError(f"사운드 카드 이름이 올바르지 않아요: {card}")
+    os.makedirs(os.path.dirname(ALSA_CONF), exist_ok=True)
+    tmp = f"{ALSA_CONF}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(alsa_conf(card))
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, ALSA_CONF)
+
+
+def volume_control_exists(card: str) -> bool:
+    return run(["amixer", "-c", card, "sget", VOLUME_CONTROL], timeout=5).returncode == 0
+
+
+def ensure_volume_control(card: str) -> bool:
+    """softvol 볼륨 조절 장치는 PCM을 처음 열 때 생긴다. 없으면 무음을 잠깐 재생해 만든다.
+    (그 카드를 Chromium이 이미 쓰고 있으면 Chromium이 열 때 이미 생겼으므로 괜찮다)"""
+    if volume_control_exists(card):
+        return True
+    silence = b"\0" * (48000 * 2 * 2 // 10)  # 0.1초, 48kHz 16비트 스테레오
+    try:
+        subprocess.run(["aplay", "-q", "-D", ALSA_PCM, "-t", "raw", "-f", "S16_LE", "-r", "48000", "-c", "2"], input=silence, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return volume_control_exists(card)
+
+
+def apply_volume(card: str, volume: int) -> bool:
+    if not ensure_volume_control(card):
+        return False
+    return run(["amixer", "-q", "-c", card, "sset", VOLUME_CONTROL, f"{volume}%"], timeout=5).returncode == 0
+
+
+def raise_hardware_levels(card: str) -> None:
+    """카드 쪽 볼륨(이어폰 잭·USB의 하드웨어 볼륨, HDMI 기본 장치의 "PCM")은 최대로 열고 음소거를 푼다.
+    실제 크기는 "MIRAEPASS Volume" 하나로 정한다."""
+    proc = run(["amixer", "-c", card, "scontrols"], timeout=5)
+    for m in re.finditer(r"Simple mixer control '([^']+)',(\d+)", proc.stdout):
+        name = m.group(1)
+        if name in ("Master", "PCM", "Speaker", "Headphone", "Front"):
+            run(["amixer", "-q", "-c", card, "sset", f"{name},{m.group(2)}", "100%", "unmute"], timeout=5)
+
+
+def apply_audio() -> str | None:
+    """저장된 출력·볼륨으로 ALSA 설정을 만들고 볼륨을 맞춘다. 부팅(서비스 시작)·설치·출력 변경 때 실행. 고른 카드를 돌려준다."""
+    with _audio_lock:
+        card = resolve_output(saved_audio_output(), sound_cards())
+        write_alsa_conf(card)
+        if card and shutil.which("amixer") and shutil.which("aplay"):
+            # 먼저 장치를 열어(볼륨 적용) softvol 조절 장치들이 생긴 뒤에 카드 쪽 볼륨을 최대로 연다
+            # (라즈베리파이 HDMI 기본 장치에도 소프트웨어 볼륨 "PCM"이 따로 있다)
+            apply_volume(card, saved_volume())
+            raise_hardware_levels(card)
+        return card
+
+
+def sound_server() -> str | None:
+    for name in ("pipewire", "pulseaudio"):
+        if run(["pgrep", "-x", name], timeout=5).returncode == 0:
+            return name
+    return None
+
+
+def audio_status() -> dict[str, Any]:
+    with _audio_lock:
+        cards = sound_cards()
+        setting = saved_audio_output()
+        active = resolve_output(setting, cards)
+        tools = bool(shutil.which("aplay") and shutil.which("amixer"))
+        configured = tools and os.path.exists(ALSA_CONF) and re.search(rf"(?m)^{ALSA_PCM}$", run(["aplay", "-L"], timeout=10).stdout) is not None
+        return {
+            "available": tools,
+            "configured": bool(configured),
+            "output": setting,
+            "active": active,
+            # 저장된 출력(예: USB 스피커)이 빠져 있어 다른 출력을 쓰는 중
+            "missing": setting != AUDIO_AUTO and active != setting,
+            "outputs": cards,
+            "volume": saved_volume(),
+            "volumeControl": bool(tools and active and volume_control_exists(active)),
+            "soundServer": sound_server(),
+        }
+
+
+def set_audio_output(output: str) -> dict[str, Any]:
+    output = output.strip()
+    cards = sound_cards()
+    if output != AUDIO_AUTO and output not in [c["id"] for c in cards]:
+        raise ValueError("연결된 출력 장치가 아니에요. 목록을 새로 고쳐 주세요")
+    with _audio_lock:
+        before = _read_text(ALSA_CONF)
+        _save_env_value("AUDIO_OUTPUT", output)
+        apply_audio()
+        status = audio_status()
+        changed = _read_text(ALSA_CONF) != before
+    if not changed:
+        return {**status, "restarting": False}
+    # Chromium이 새 ALSA 설정을 읽도록 응답을 보낸 뒤 키오스크 화면을 다시 시작한다 (실행 중일 때만)
+    restart = threading.Timer(1.5, lambda: run(["systemctl", "try-restart", "--no-block", "miraepass-kiosk.service"], timeout=15))
+    restart.daemon = True
+    restart.start()
+    return {**status, "restarting": True}
+
+
+def _read_text(path: str) -> str | None:
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def set_audio_volume(value: Any) -> dict[str, Any]:
+    volume = parse_volume(value)
+    if volume is None:
+        raise ValueError("볼륨은 0~100 사이여야 해요")
+    with _audio_lock:
+        _save_env_value("AUDIO_VOLUME", str(volume))
+        card = resolve_output(saved_audio_output(), sound_cards())
+        applied = bool(card) and apply_volume(card, volume)
+        return {**audio_status(), "applied": applied}
+
+
+def volume_gain(volume: int) -> float:
+    """softvol과 같은 곡선(0%=무음, 그 위는 -40dB~0dB 직선)의 배율."""
+    if volume <= 0:
+        return 0.0
+    return 10 ** (VOLUME_MIN_DB * (1 - volume / 100) / 20)
+
+
+def test_tone(volume: int) -> bytes:
+    """'삐-삐' 테스트음 (WAV, 48kHz 16비트 스테레오). 볼륨 설정을 미리 반영해 둔다."""
+    rate = 48000
+    amp = 0.6 * volume_gain(volume) * 32767
+    frames = bytearray()
+    for freq, seconds in ((880, 0.25), (0, 0.12), (1320, 0.35)):
+        n = int(rate * seconds)
+        for i in range(n):
+            fade = min(1.0, i / 480, (n - i) / 480)  # 앞뒤 10ms 페이드로 '딱' 소리 방지
+            sample = int(amp * fade * math.sin(2 * math.pi * freq * i / rate)) if freq else 0
+            frames += struct.pack("<hh", sample, sample)
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(bytes(frames))
+    return buf.getvalue()
+
+
+def play_test(output: str) -> dict[str, Any]:
+    """고른 출력으로 기기가 직접 테스트음을 낸다. 저장하기 전에 어느 출력에서 소리가 나는지 확인하는 용도."""
+    if not shutil.which("aplay"):
+        raise RuntimeError("aplay(alsa-utils)가 설치돼 있지 않아요. 설치 스크립트로 업데이트해 주세요")
+    cards = sound_cards()
+    card = output.strip() or resolve_output(saved_audio_output(), cards)
+    if not card or card not in [c["id"] for c in cards]:
+        raise ValueError("소리를 낼 출력 장치를 찾지 못했어요")
+    volume = saved_volume()
+    if volume == 0:
+        raise ValueError("볼륨이 0이에요. 볼륨을 올린 뒤 다시 시도해 주세요")
+    try:
+        proc = subprocess.run(["aplay", "-q", "-D", f"default:CARD={card}", "-"], input=test_tone(volume), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15, check=False)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("테스트음 재생이 끝나지 않았어요") from None
+    if proc.returncode != 0:
+        detail = proc.stdout.decode("utf-8", "replace").strip()
+        if "busy" in detail.lower():
+            raise RuntimeError("키오스크 화면이 이 출력을 쓰고 있어 기기 테스트음을 낼 수 없어요. ‘화면에서 재생’으로 확인해 주세요")
+        lines = [line for line in detail.splitlines() if line.strip()]
+        raise RuntimeError(f"테스트음을 재생하지 못했어요: {lines[-1]}" if lines else "테스트음을 재생하지 못했어요")
+    return {"ok": True, "output": card}
+
+
 # ───────────────────────── 관리자 / 시스템 ─────────────────────────
 
 
@@ -1092,6 +1399,7 @@ DEPLOYED_FILES = (
     "/etc/systemd/system/miraepass-firewall.service",
     "/etc/miraepass/firewall.nft",
     "/etc/X11/xorg.conf.d/99-miraepass-touch-rotation.conf",
+    "/etc/alsa/conf.d/60-miraepass-kiosk.conf",
     "/etc/chromium/policies/managed/miraepass-kiosk.json",
     "/etc/chromium-browser/policies/managed/miraepass-kiosk.json",
     "/etc/opt/chrome/policies/managed/miraepass-kiosk.json",
@@ -1490,6 +1798,10 @@ ROUTES: dict[tuple[str, str], Any] = {
     ("POST", "/display/confirm"): lambda b: confirm_rotation(),
     ("POST", "/display/revert"): lambda b: revert_rotation(),
     ("POST", "/display/scale"): lambda b: set_scale(b.get("scale")),
+    ("GET", "/audio/status"): lambda b: audio_status(),
+    ("POST", "/audio/output"): lambda b: set_audio_output(str(b.get("output", ""))),
+    ("POST", "/audio/volume"): lambda b: set_audio_volume(b.get("volume")),
+    ("POST", "/audio/test"): lambda b: play_test(str(b.get("output", ""))),
     ("POST", "/security/firewall"): lambda b: set_firewall(bool(b.get("enabled"))),
     ("POST", "/security/ssh"): lambda b: set_ssh(bool(b.get("enabled"))),
     ("GET", "/update/status"): lambda b: update_status(),
@@ -1503,9 +1815,12 @@ ROUTES: dict[tuple[str, str], Any] = {
 
 def cli(args: list[str]) -> int:
     """설치 스크립트·systemd용:
-    firewall on|off|status | touch-conf <방향> | update"""
+    firewall on|off|status | touch-conf <방향> | audio-conf | update"""
     if args == ["update"]:
         return run_update()
+    if args == ["audio-conf"]:
+        print(json.dumps({"card": apply_audio()}, ensure_ascii=False))
+        return 0
     if len(args) == 2 and args[0] == "touch-conf" and args[1] in ROTATIONS:
         write_touch_conf(args[1])
         return 0
@@ -1513,13 +1828,20 @@ def cli(args: list[str]) -> int:
         result = security_status() if args[1] == "status" else set_firewall(args[1] == "on")
         print(json.dumps(result, ensure_ascii=False))
         return 0
-    print("usage: miraepass-kiosk-control.py firewall on|off|status | touch-conf <방향> | update", file=sys.stderr)
+    print("usage: miraepass-kiosk-control.py firewall on|off|status | touch-conf <방향> | audio-conf | update", file=sys.stderr)
     return 2
 
 
 def main() -> None:
     if len(sys.argv) > 1:
         sys.exit(cli(sys.argv[1:]))
+    # 소리 출력은 부팅할 때마다 다시 고른다 (자동이면 그때 연결된 HDMI). 키오스크 화면은 이 서비스가
+    # 포트를 연 뒤에 Chromium을 띄우므로, 그 전에 ALSA 설정과 볼륨 조절 장치를 준비해 둔다.
+    try:
+        card = apply_audio()
+        print(f"[kiosk-control] 소리 출력: {card or '없음'}", flush=True)
+    except Exception as exc:  # pragma: no cover - 소리 설정 실패로 서비스가 멈추면 안 된다
+        print(f"[kiosk-control] 소리 설정 실패: {exc}", flush=True)
     ThreadingHTTPServer.daemon_threads = True
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"MIRAEPASS kiosk control API listening on http://{HOST}:{PORT}", flush=True)
