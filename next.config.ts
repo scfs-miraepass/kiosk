@@ -7,7 +7,7 @@ const { version } = JSON.parse(readFileSync(path.join(process.cwd(), "package.js
 
 const nextConfig: NextConfig = {
   transpilePackages: ["@miraepass/api-client"],
-  serverExternalPackages: ["better-sqlite3"],
+  serverExternalPackages: ["better-sqlite3", "sherpa-onnx-node"],
   env: {
     NEXT_PUBLIC_APP_VERSION: version,
   },

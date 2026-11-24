@@ -118,6 +118,10 @@ chromium-browser --kiosk --noerrdialogs --disable-infobars --no-first-run \
 | `SESSION_SECRET` | 세션 암호화 키(32자 이상) |
 | `KIOSK_DEVICE_TOKEN` | 키오스크 기기 등록 토큰 |
 | `DATABASE_PATH`, `UPLOAD_DIR` | 기본값은 `./data/cafe.db`, `./data/uploads` |
+| `TTS_MODEL_DIR` | 서버 TTS 모델 폴더. Docker 이미지에는 `/app/models/supertonic-3`로 들어 있습니다. 비워 두면 서버 음성을 끄고 직원 화면은 알림음만 냅니다 |
+| `TTS_CACHE_DIR` | 만든 음성 파일 캐시. 기본 `./data/tts-cache` (Docker: `/app/data/tts-cache`) |
+| `TTS_THREADS` / `TTS_STEPS` / `TTS_SID` | 생성 스레드 수(기본 `2`), 품질 단계(기본 `8`), 목소리(기본 `0`) |
+| `TTS_CACHE_MAX_AGE_DAYS` / `TTS_CACHE_MAX_MB` | 이 기간 동안 안 쓴 음성은 지움(기본 `60`일), 캐시 전체 상한(기본 `1024`MB) |
 
 ## 결제 흐름
 
@@ -147,7 +151,13 @@ chromium-browser --kiosk --noerrdialogs --disable-infobars --no-first-run \
 
 ## 음성 호출
 
-- 직원 기기의 브라우저 Web Speech API(ko-KR)를 사용합니다.
+- 안내 음성은 **서버에서 만듭니다**(`lib/tts`, [Supertonic 3](https://huggingface.co/Supertone/supertonic-3) + [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)). 기기 TTS는 기기마다 목소리·속도가 다르고, iOS에서는 다른 앱 음악을 멈춘 채 돌려주지 않기 때문입니다.
+  - 주문이 들어오면 새 주문 안내와 함께 **픽업 호출 음성도 미리** 만들어 두므로, 호출할 때는 기다리지 않습니다. 문장 하나에 2코어 기준 약 0.9초가 걸립니다(`scripts/tts-bench`).
+  - 같은 문장은 `TTS_CACHE_DIR`에 저장해 다시 씁니다. 안내 문구나 속도를 바꾸면 이전 음성을 바로 지우고, 하루 한 번 오래 안 쓴 음성과 용량 상한을 넘는 음성을 정리합니다.
+  - 모델이 아라비아 숫자를 어눌하게 읽어서 숫자는 한글로 바꿔 넣습니다(3학년 → 삼학년).
+  - 음성 파일(`GET /api/tts/:id`)에는 고객 이름이 들어 있어 직원 로그인이 필요합니다.
+  - 모델 가중치는 BigScience OpenRAIL-M 라이선스입니다(이미지의 `models/supertonic-3/LICENSE-MODEL`). AI로 만든 음성이라는 점을 화면에 표시해야 합니다.
+- 직원 화면은 아직 기기의 Web Speech API(ko-KR)로 읽습니다. 서버 음성을 웹 오디오로 재생하도록 바꾸는 작업은 기기 테스트 뒤에 이어서 합니다.
 - 브라우저 정책 때문에 직원 화면을 연 뒤 "음성 알림 켜기"를 한 번 눌러야 소리가 납니다.
 - 새 주문 알림과 픽업 호출은 **기기별로** 켜고 끌 수 있습니다(상단 스피커 아이콘). 카운터 스피커에 연결된 기기에서만 호출을 켜 두세요.
 - 안내 문구는 관리자 › 설정 › 음성 호출에서 바꿀 수 있습니다(`{name}`, `{grade}`, `{orderNo}`, `{menu}`).

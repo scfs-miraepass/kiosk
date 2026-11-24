@@ -8,6 +8,7 @@ import { seedIfEmpty } from "./lib/db/seed";
 import { recoverInterruptedPayments } from "./lib/payment-recovery";
 import { setIO, type IO } from "./lib/realtime";
 import { readSessionCookie, SESSION_COOKIE } from "./lib/session-core";
+import { startTtsMaintenance } from "./lib/tts";
 import { parseUploadPath } from "./lib/uploads";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -64,6 +65,7 @@ app.prepare().then(() => {
   // destroyUpgrade:false → socket.io 외 경로(HMR 등)의 업그레이드 요청을 끊지 않음
   const io: IO = new Server(httpServer, { path: "/socket.io", serveClient: false, destroyUpgrade: false });
   setIO(io);
+  startTtsMaintenance();
 
   io.on("connection", async (socket) => {
     const { role, kioskToken } = (socket.handshake.auth ?? {}) as { role?: string; kioskToken?: string };

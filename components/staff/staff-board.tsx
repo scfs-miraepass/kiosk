@@ -26,10 +26,10 @@ import { useMe, usePublicSettings, useStoreStatus } from "@/hooks/queries";
 import { useNow } from "@/hooks/use-now";
 import { useSocket } from "@/hooks/use-socket";
 import { api, ClientApiError } from "@/lib/fetcher";
-import { customerLabel, fillTemplate, formatPoint, PAYMENT_LABEL, STATUS_LABEL } from "@/lib/format";
+import { callText, customerLabel, fillTemplate, formatPoint, PAYMENT_LABEL, STATUS_LABEL } from "@/lib/format";
 import { qk } from "@/lib/query-keys";
 import { announce, hasKoreanVoice, speechSupported, unlockAudio } from "@/lib/speech";
-import type { OrderCallPayload, OrderDTO, OrderStatus, VoiceSettings } from "@/lib/types";
+import type { OrderDTO, OrderStatus, VoiceSettings } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { freshOrderIdsAtom, soundUnlockedAtom, staffPrefsAtom } from "@/store/staff";
 import { CancelDialog } from "./cancel-dialog";
@@ -62,11 +62,6 @@ function upsert(data: ActiveData | undefined, order: OrderDTO): ActiveData | und
   else if (order.status === "completed" || order.status === "cancelled") closedToday.unshift(order);
   active.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   return { active, closedToday };
-}
-
-export function callText(voice: VoiceSettings, p: OrderCallPayload) {
-  const tpl = p.customerType === "teacher" ? voice.callTeacher : voice.callStudent;
-  return fillTemplate(tpl, { name: p.customerName, grade: p.grade, orderNo: p.orderNo, menu: p.menu });
 }
 
 export function StaffBoard() {

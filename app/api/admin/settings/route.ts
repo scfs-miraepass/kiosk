@@ -2,6 +2,7 @@ import { z } from "zod";
 import { handler, ok, parseBody, requireUser } from "@/lib/api";
 import { emit } from "@/lib/realtime";
 import { getSettings, getStoreStatus, updateSettings } from "@/lib/settings";
+import { cleanupTtsCache } from "@/lib/tts";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,8 @@ export const PUT = handler(async (req) => {
   await requireUser("admin");
   const patch = await parseBody(req, Body);
   const settings = updateSettings(patch);
+  // 문구·속도가 바뀌면 이전 설정으로 만든 음성은 더 쓰지 않으므로 바로 지운다
+  if (patch.voice) cleanupTtsCache(settings.voice);
   const status = getStoreStatus();
   emit(["kiosk", "staff", "admin"], "store:changed", status);
   emit(["kiosk", "staff", "admin"], "settings:changed");
