@@ -143,7 +143,7 @@ chromium-browser --kiosk --noerrdialogs --disable-infobars --no-first-run \
    - **응답을 받지 못하면**(타임아웃·네트워크 오류·5xx) 실제로 빠졌는지 알 수 없으므로 실패로 단정하지 않고 **결제 확인 필요**(`payment_status = unknown`)로 남깁니다. 키오스크는 다시 결제하지 말고 직원에게 알리라고 안내합니다(이중 차감 방지).
    - 관리자는 대시보드 배너나 주문 기록(결제 상태: 결제 확인 필요)에서 MIRAEPASS 포인트 내역을 보고 **차감됨 · 주문 접수** 또는 **차감 안 됨**으로 확정합니다. 차감됨으로 확정하면 주문번호가 붙어 직원 화면에 새 주문으로 올라갑니다.
    - 서버가 결제·환불 도중 재시작되면 시작할 때 `pending_payment` 주문은 결제 확인 필요로, 환불 중이던 주문은 환불 실패로 바꿉니다(`lib/payment-recovery.ts`).
-6. 차감에 성공하면 그날의 주문번호를 부여하고, 직원 기기에 `order:new`를 보내며 "주문이 들어왔어요" 음성 알림이 나갑니다.
+6. 차감에 성공하면 그날의 주문번호를 부여하고, 직원 기기에 `order:new`를 보내며 "주문이 들어왔어요" 음성 알림이 나갑니다(서버 AI 음성, [음성 호출](#음성-호출) 참고).
 7. 직원이 **제조 완료**를 누르면 `order:call`이 나가고 "3학년 홍길동님, 주문하신 음료가 나왔습니다"라고 호출합니다.
 8. 직원이 주문을 취소하면 `/point/grant`로 자동 환불합니다. 환불에 실패하면 `refund_failed`로 표시되고, 관리자 화면에서 다시 시도할 수 있습니다.
    - 환불은 **취소된 주문만** 할 수 있습니다. 지급 전에 주문을 `refunding`으로 선점하므로 재시도를 여러 번 눌러도 한 번만 지급됩니다.
@@ -151,16 +151,26 @@ chromium-browser --kiosk --noerrdialogs --disable-infobars --no-first-run \
 
 ## 음성 호출
 
-- 안내 음성은 **서버에서 만듭니다**(`lib/tts`, [Supertonic 3](https://huggingface.co/Supertone/supertonic-3) + [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)). 기기 TTS는 기기마다 목소리·속도가 다르고, iOS에서는 다른 앱 음악을 멈춘 채 돌려주지 않기 때문입니다.
+> **AI 생성 음성 안내**: 직원 화면과 관리자 미리 듣기에서 나오는 안내 음성은 Supertone의 [Supertonic 3](https://huggingface.co/Supertone/supertonic-3) 모델로 서버에서 **AI가 생성한 음성**입니다. 실제 사람의 목소리가 아닙니다.
+
+- 안내 음성은 **서버에서 만듭니다**(`lib/tts`, Supertonic 3 + [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)). 기기 TTS는 기기마다 목소리·속도가 다르고, iOS에서는 다른 앱 음악을 멈춘 채 돌려주지 않기 때문입니다.
   - 주문이 들어오면 새 주문 안내와 함께 **픽업 호출 음성도 미리** 만들어 두므로, 호출할 때는 기다리지 않습니다. 문장 하나에 2코어 기준 약 0.9초가 걸립니다(`scripts/tts-bench`).
   - 같은 문장은 `TTS_CACHE_DIR`에 저장해 다시 씁니다. 안내 문구나 속도를 바꾸면 이전 음성을 바로 지우고, 하루 한 번 오래 안 쓴 음성과 용량 상한을 넘는 음성을 정리합니다.
   - 모델이 아라비아 숫자를 어눌하게 읽어서 숫자는 한글로 바꿔 넣습니다(3학년 → 삼학년).
   - 음성 파일(`GET /api/tts/:id`)에는 고객 이름이 들어 있어 직원 로그인이 필요합니다.
-  - 모델 가중치는 BigScience OpenRAIL-M 라이선스입니다(이미지의 `models/supertonic-3/LICENSE-MODEL`). AI로 만든 음성이라는 점을 화면에 표시해야 합니다.
-- 직원 화면은 아직 기기의 Web Speech API(ko-KR)로 읽습니다. 서버 음성을 웹 오디오로 재생하도록 바꾸는 작업은 기기 테스트 뒤에 이어서 합니다.
-- 브라우저 정책 때문에 직원 화면을 연 뒤 "음성 알림 켜기"를 한 번 눌러야 소리가 납니다.
+  - 서버 TTS를 쓸 수 없으면(모델 없음·로딩 실패) 직원 화면은 알림음만 냅니다. 주문 처리에는 영향이 없습니다.
+- 직원 화면은 받은 음성을 **웹 오디오**로 재생합니다(`lib/voice-player.ts`). 다른 앱에서 틀어 둔 음악을 멈추지 않게 하려고 실기기(iPad) 테스트로 정한 방식입니다.
+  - 기기 TTS(`speechSynthesis`)와 `<audio>`는 쓰지 않습니다. iOS에서 음악이 멈춘 채 돌아오지 않거나, 알림음이 반복 재생됐습니다.
+  - iOS(Safari 등 Audio Session 지원 브라우저)는 `ambient`로 재생해 음악과 섞입니다. **무음 모드에서는 알림이 들리지 않으니** 직원 기기의 무음 모드를 꺼 두세요.
+- 브라우저 정책 때문에 직원 화면을 연 뒤 "여기를 눌러 음성 알림을 켜 주세요"를 한 번 눌러야 소리가 납니다.
 - 새 주문 알림과 픽업 호출은 **기기별로** 켜고 끌 수 있습니다(상단 스피커 아이콘). 카운터 스피커에 연결된 기기에서만 호출을 켜 두세요.
-- 안내 문구는 관리자 › 설정 › 음성 호출에서 바꿀 수 있습니다(`{name}`, `{grade}`, `{orderNo}`, `{menu}`).
+- 안내 문구와 속도는 관리자 › 설정 › 음성 호출에서 바꿀 수 있습니다(`{name}`, `{grade}`, `{orderNo}`, `{menu}`). 미리 듣기도 서버 음성으로 들려줍니다.
+
+### 모델 라이선스
+
+- Supertonic 3 모델 가중치는 [BigScience OpenRAIL-M](https://huggingface.co/Supertone/supertonic-3/blob/main/LICENSE) 라이선스입니다. 상업적 이용은 허용되지만 사용 제한 조항(Attachment A)을 따라야 합니다. 그중 이 서비스와 관계있는 것은 **AI로 생성한 음성임을 밝힐 것**(위 안내)입니다.
+- Docker 이미지에는 라이선스 원문을 `models/supertonic-3/LICENSE-MODEL`로 함께 넣습니다. 모델을 다른 곳에 배포할 때도 원문을 함께 전달해야 합니다.
+- sherpa-onnx는 Apache-2.0입니다.
 
 ## 개발
 
