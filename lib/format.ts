@@ -1,4 +1,4 @@
-import type { CustomerType, OrderStatus, PaymentStatus } from "./types";
+import type { CustomerType, OrderStatus, PaymentStatus, VoiceSettings } from "./types";
 
 /** 가운데 글자 마스킹: 홍길동 → 홍*동, 김미 → 김* */
 export function maskName(name: string) {
@@ -44,6 +44,20 @@ export const PAYMENT_LABEL: Record<PaymentStatus, string> = {
 /** 음성 템플릿 치환: {name} {grade} {orderNo} {menu} */
 export function fillTemplate(template: string, vars: Record<string, string | number | null | undefined>) {
   return template.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ""));
+}
+
+/** 새 주문 안내 문장 */
+export function newOrderText(voice: VoiceSettings, orderNo: number) {
+  return fillTemplate(voice.newOrder, { orderNo });
+}
+
+/** 픽업 호출 문장 (학생/선생님 문구 중 고객 유형에 맞는 것) */
+export function callText(
+  voice: VoiceSettings,
+  p: { customerType: CustomerType; customerName: string; grade: number | null; orderNo: number; menu: string },
+) {
+  const tpl = p.customerType === "teacher" ? voice.callTeacher : voice.callStudent;
+  return fillTemplate(tpl, { name: p.customerName, grade: p.grade, orderNo: p.orderNo, menu: p.menu });
 }
 
 /** 키오스크에서 고객을 부르는 이름: "3학년 4반 최*딩" / "홍*동 선생님" */

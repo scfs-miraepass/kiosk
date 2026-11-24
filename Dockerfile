@@ -34,6 +34,20 @@ RUN --mount=type=cache,id=yarn-cache,target=/usr/local/share/.cache/yarn,sharing
     && rm -rf node_modules/better-sqlite3/deps node_modules/better-sqlite3/src \
               node_modules/better-sqlite3/build/Release/obj* node_modules/better-sqlite3/build/deps
 
+# ---------- 서버 TTS 모델 (Supertonic 3, 약 145MB) ----------
+# 직원 화면 음성 안내를 서버에서 만든다 (lib/tts). 모델 버전을 바꾸면 lib/tts/engine.ts의 MODEL_ID도 바꾼다.
+# 모델 가중치는 OpenRAIL-M 라이선스라 라이선스 원문(LICENSE-MODEL)을 함께 배포한다.
+FROM debian:bookworm-slim AS tts-model
+ARG TTS_MODEL=sherpa-onnx-supertonic-3-tts-int8-2026-05-11
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl bzip2 ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /models \
+    && curl -fsSL "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/${TTS_MODEL}.tar.bz2" | tar xj -C /models \
+    && mv "/models/${TTS_MODEL}" /models/supertonic-3 \
+    && curl -fsSL -o /models/supertonic-3/LICENSE-MODEL "https://huggingface.co/Supertone/supertonic-3/raw/main/LICENSE" \
+    && rm -f /models/supertonic-3/README.md
+
 # ---------- 개발 (docker-compose.dev.yml 전용) ----------
 # 소스는 바인드 마운트로 들어오고, node_modules는 이미지에 설치된 리눅스용을 사용합니다.
 FROM deps AS dev
@@ -52,7 +66,9 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
     DATABASE_PATH=/app/data/cafe.db \
-    UPLOAD_DIR=/app/data/uploads
+    UPLOAD_DIR=/app/data/uploads \
+    TTS_MODEL_DIR=/app/models/supertonic-3 \
+    TTS_CACHE_DIR=/app/data/tts-cache
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=builder /app/package.json /app/next.config.ts ./
@@ -60,12 +76,13 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/drizzle ./drizzle
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/.next ./.next
+COPY --from=tts-model /models ./models
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN rm -rf .next/cache && mkdir -p data && chown node:node data
 
 # USER는 지정하지 않습니다. 엔트리포인트가 /app/data 권한을 맞춘 뒤 node 사용자로 전환합니다.
 EXPOSE 3000
-# SQLite DB와 업로드된 메뉴 이미지가 저장되는 위치
+# SQLite DB, 업로드된 메뉴 이미지, 서버 TTS 음성 캐시가 저장되는 위치
 VOLUME ["/app/data"]
 
 ENTRYPOINT ["docker-entrypoint.sh"]

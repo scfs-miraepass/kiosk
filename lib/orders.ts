@@ -7,8 +7,10 @@ import { miraepass, MiraepassError } from "./miraepass";
 import { lockedFor, recordFailure, recordSuccess } from "./pin-guard";
 import { PricingError, priceCart } from "./pricing";
 import { emit } from "./realtime";
-import { getStoreStatus } from "./settings";
+import { callText, newOrderText } from "./format";
+import { getSettings, getStoreStatus } from "./settings";
 import { businessDate } from "./store-hours";
+import { requestClipUrl } from "./tts";
 import type {
   CreateOrderInput,
   CreateOrderResult,
@@ -111,8 +113,9 @@ export function menuSummary(o: OrderDTO) {
   return count > 0 ? `${first.name} 외 ${count}개` : first.name;
 }
 
-export function callPayload(o: OrderDTO): OrderCallPayload {
-  return {
+/** 픽업 호출 알림. 호출 음성은 주문 접수 때 미리 만들어 두므로 보통 캐시에서 바로 나간다 */
+export function callPayload(o: OrderDTO, voice = getSettings().voice): OrderCallPayload {
+  const base = {
     orderId: o.id,
     orderNo: o.orderNo,
     customerName: o.customerName,
@@ -120,6 +123,18 @@ export function callPayload(o: OrderDTO): OrderCallPayload {
     grade: o.customerGrade,
     menu: menuSummary(o),
   };
+  return { ...base, voiceUrl: requestClipUrl(callText(voice, base), voice) };
+}
+
+/**
+ * 직원 화면에 새 주문 알림. 새 주문 안내 음성을 먼저 요청하고,
+ * 이어서 픽업 호출 음성도 미리 만들어 두어 호출할 때는 기다리지 않게 한다.
+ */
+function emitNewOrder(order: OrderDTO) {
+  const voice = getSettings().voice;
+  const voiceUrl = requestClipUrl(newOrderText(voice, order.orderNo), voice);
+  callPayload(order, voice);
+  emit(["staff", "admin"], "order:new", order, voiceUrl);
 }
 
 /* ------------------------------------------------------------------ */
@@ -254,7 +269,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     throw err;
   }
   const orderNo = confirmPaid(orderId, day, balanceAfter);
-  emit(["staff", "admin"], "order:new", getOrder(orderId));
+  emitNewOrder(getOrder(orderId));
   return { orderId, orderNo, total: priced.total, balanceAfter };
 }
 
@@ -293,7 +308,7 @@ export function resolveUnknownPayment(id: number, paid: boolean, actor: SessionU
   if (paid) confirmPaid(id, claimed.businessDate, null);
   logAction(id, actor, paid ? "payment_confirmed" : "payment_voided");
   const order = getOrder(id);
-  if (paid) emit(["staff", "admin"], "order:new", order);
+  if (paid) emitNewOrder(order);
   else emit("admin", "order:updated", order);
   return order;
 }
