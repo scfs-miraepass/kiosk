@@ -1,6 +1,6 @@
 {
   "name": "miraepass-kiosk",
-  "version": "1.7.1",
+  "version": "1.8.0-dev.1",
   "private": true,
   "description": "순천미래과학고 교내 카페 키오스크 (MIRAEPASS 결제)",
   "workspaces": [
@@ -43,6 +43,7 @@
     "react-dom": "^19.3.1",
     "recharts": "3.8.0",
     "server-only": "^0.0.1",
+    "sherpa-onnx-node": "2.0.1",
     "socket.io": "^4.8.4",
     "socket.io-client": "^4.8.4",
     "sonner": "^2.0.8",

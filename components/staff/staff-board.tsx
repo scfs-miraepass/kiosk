@@ -26,11 +26,11 @@ import { useMe, usePublicSettings, useStoreStatus } from "@/hooks/queries";
 import { useNow } from "@/hooks/use-now";
 import { useSocket } from "@/hooks/use-socket";
 import { api, ClientApiError } from "@/lib/fetcher";
-import { customerLabel, fillTemplate, formatPoint, PAYMENT_LABEL, STATUS_LABEL } from "@/lib/format";
+import { customerLabel, formatPoint, PAYMENT_LABEL, STATUS_LABEL } from "@/lib/format";
 import { qk } from "@/lib/query-keys";
-import { announce, hasKoreanVoice, speechSupported, unlockAudio } from "@/lib/speech";
-import type { OrderCallPayload, OrderDTO, OrderStatus, VoiceSettings } from "@/lib/types";
+import type { OrderDTO, OrderStatus, VoiceSettings } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { announce, audioSupported, fetchClip, unlockAudio } from "@/lib/voice-player";
 import { freshOrderIdsAtom, soundUnlockedAtom, staffPrefsAtom } from "@/store/staff";
 import { CancelDialog } from "./cancel-dialog";
 import { InstallAppButton } from "./install-app";
@@ -64,16 +64,10 @@ function upsert(data: ActiveData | undefined, order: OrderDTO): ActiveData | und
   return { active, closedToday };
 }
 
-export function callText(voice: VoiceSettings, p: OrderCallPayload) {
-  const tpl = p.customerType === "teacher" ? voice.callTeacher : voice.callStudent;
-  return fillTemplate(tpl, { name: p.customerName, grade: p.grade, orderNo: p.orderNo, menu: p.menu });
-}
-
 export function StaffBoard() {
   const qc = useQueryClient();
   const me = useMe();
   const status = useStoreStatus();
-  const settings = usePublicSettings();
   const prefs = useAtomValue(staffPrefsAtom);
   const [unlocked, setUnlocked] = useAtom(soundUnlockedAtom);
   const [fresh, setFresh] = useAtom(freshOrderIdsAtom);
@@ -83,33 +77,32 @@ export function StaffBoard() {
   const [showClosed, setShowClosed] = useState(false);
   const now = useNow(15_000);
 
-  const voice = settings.data?.voice ?? DEFAULT_VOICE;
-
   const orders = useQuery({
     queryKey: qk.activeOrders,
     queryFn: () => api<ActiveData>("/api/orders/active"),
     refetchInterval: 60_000,
   });
 
-  const speak = useCallback(
-    (text: string, enabled: boolean) => {
+  /** 서버 음성 재생. 음성이 없으면(서버 TTS 꺼짐) 알림음 설정과 상관없이 알림음은 낸다 */
+  const notify = useCallback(
+    (voiceUrl: string | null, enabled: boolean) => {
       if (!unlocked || !enabled) return;
-      announce(text, { rate: voice.rate, chime: prefs.chime });
+      void announce({ url: voiceUrl, chime: prefs.chime || !voiceUrl });
     },
-    [unlocked, voice.rate, prefs.chime],
+    [unlocked, prefs.chime],
   );
 
   const connected = useSocket(
     { role: "staff" },
     {
-      "order:new": (order) => {
+      "order:new": (order, voiceUrl) => {
         qc.setQueryData<ActiveData>(qk.activeOrders, (d) => upsert(d, order));
         setFresh((s) => new Set(s).add(order.id));
-        speak(fillTemplate(voice.newOrder, { orderNo: order.orderNo }), prefs.announceNewOrder);
+        notify(voiceUrl, prefs.announceNewOrder);
         toast.info(`새 주문 #${order.orderNo} · ${customerLabel(order)}`);
       },
       "order:updated": (order) => qc.setQueryData<ActiveData>(qk.activeOrders, (d) => upsert(d, order)),
-      "order:call": (p) => speak(callText(voice, p), prefs.announceCall),
+      "order:call": (p) => notify(p.voiceUrl, prefs.announceCall),
       "menu:changed": () => qc.invalidateQueries({ queryKey: qk.adminMenu }),
       "store:changed": (s) => qc.setQueryData(qk.storeStatus, s),
       "settings:changed": () => qc.invalidateQueries({ queryKey: qk.publicSettings }),
@@ -210,7 +203,7 @@ export function StaffBoard() {
           onClick={() => {
             unlockAudio();
             setUnlocked(true);
-            if (speechSupported() && !hasKoreanVoice()) toast.warning("이 기기에 한국어 음성이 없어요. 알림음만 재생돼요.");
+            if (!audioSupported()) toast.warning("이 브라우저는 소리를 재생할 수 없어요.");
           }}
           className="flex shrink-0 items-center justify-center gap-2 bg-primary px-4 py-3 text-base font-bold text-primary-foreground"
         >
@@ -372,12 +365,11 @@ function SoundSettings() {
   const voice = settings.data?.voice ?? DEFAULT_VOICE;
   const anyOn = prefs.announceNewOrder || prefs.announceCall;
 
-  const test = () => {
-    if (!unlocked) {
-      unlockAudio();
-      setUnlocked(true);
-    }
-    announce(fillTemplate(voice.callStudent, { grade: 3, name: "홍길동" }), { rate: voice.rate, chime: prefs.chime });
+  const test = async () => {
+    unlockAudio();
+    if (!unlocked) setUnlocked(true);
+    const r = await announce({ clip: fetchClip("/api/tts/test", { cache: "no-store" }), chime: prefs.chime });
+    if (!r.voice) toast.warning(r.played ? "서버 음성을 받지 못해 알림음만 재생했어요." : "소리를 재생하지 못했어요. 무음 모드인지 확인해 주세요.");
   };
 
   return (

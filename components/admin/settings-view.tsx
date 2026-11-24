@@ -14,10 +14,10 @@ import { useAdminSettings } from "@/hooks/queries";
 import { api, ClientApiError } from "@/lib/fetcher";
 import { fillTemplate } from "@/lib/format";
 import { qk } from "@/lib/query-keys";
-import { announce, unlockAudio } from "@/lib/speech";
 import { WEEKDAY_KO } from "@/lib/store-hours";
 import type { AppSettings, StoreHours } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { announce, unlockAudio } from "@/lib/voice-player";
 
 export function SettingsView() {
   const settings = useAdminSettings();
@@ -47,9 +47,29 @@ function SettingsForm({ initial, kioskToken }: { initial: AppSettings; kioskToke
   const setDay = (day: keyof StoreHours, patch: Partial<StoreHours[keyof StoreHours]>) =>
     setS((p) => ({ ...p, storeHours: { ...p.storeHours, [day]: { ...p.storeHours[day], ...patch } } }));
 
-  const preview = (text: string) => {
-    unlockAudio();
-    announce(text, { rate: s.voice.rate });
+  const [previewing, setPreviewing] = useState<string | null>(null);
+  /** 저장 전 문구·속도로 서버가 만든 음성을 바로 들어 본다 */
+  const preview = async (key: string, text: string) => {
+    unlockAudio(); // 클릭 제스처 안에서 먼저
+    setPreviewing(key);
+    try {
+      const res = await fetch("/api/admin/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, rate: s.voice.rate }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        toast.error(body?.message ?? "미리듣기에 실패했어요");
+        return;
+      }
+      const r = await announce({ clip: res.arrayBuffer() });
+      if (!r.played) toast.error("소리를 재생하지 못했어요");
+    } catch {
+      toast.error("미리듣기에 실패했어요");
+    } finally {
+      setPreviewing(null);
+    }
   };
 
   const saveButton = (patch: Partial<AppSettings>) => (
@@ -205,7 +225,7 @@ function SettingsForm({ initial, kioskToken }: { initial: AppSettings; kioskToke
         <CardHeader>
           <CardTitle>음성 호출</CardTitle>
           <CardDescription>
-            직원 기기에서 재생돼요. 사용할 수 있는 값: <code>{"{name}"}</code> 이름, <code>{"{grade}"}</code> 학년, <code>{"{orderNo}"}</code> 주문번호,{" "}
+            서버에서 음성을 만들어 직원 기기에서 재생해요. 문구나 속도를 바꾸면 음성을 새로 만들어요. 사용할 수 있는 값: <code>{"{name}"}</code> 이름, <code>{"{grade}"}</code> 학년, <code>{"{orderNo}"}</code> 주문번호,{" "}
             <code>{"{menu}"}</code> 대표 메뉴
           </CardDescription>
         </CardHeader>
@@ -221,8 +241,8 @@ function SettingsForm({ initial, kioskToken }: { initial: AppSettings; kioskToke
               <Label>{label}</Label>
               <div className="flex gap-2">
                 <Input value={s.voice[key]} maxLength={100} onChange={(e) => setS({ ...s, voice: { ...s.voice, [key]: e.target.value } })} />
-                <Button variant="outline" onClick={() => preview(fillTemplate(s.voice[key], vars))}>
-                  <Play /> 미리듣기
+                <Button variant="outline" disabled={previewing !== null} onClick={() => preview(key, fillTemplate(s.voice[key], vars))}>
+                  {previewing === key ? <Loader2 className="animate-spin" /> : <Play />} 미리듣기
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">→ {fillTemplate(s.voice[key], vars)}</p>

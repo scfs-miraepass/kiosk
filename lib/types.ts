@@ -202,6 +202,8 @@ export type ApiErrorCode =
   | "NOT_REGISTERED"
   | "PIN_LOCKED"
   | "NOT_FOUND"
+  /** 서버 TTS를 쓸 수 없음 (모델 없음·로딩 실패) */
+  | "TTS_UNAVAILABLE"
   | "VALIDATION"
   | "RATE_LIMITED"
   | "INTERNAL";
@@ -213,10 +215,13 @@ export type OrderCallPayload = {
   customerType: CustomerType;
   grade: number | null;
   menu: string;
+  /** 서버에서 만든 호출 음성 (/api/tts/...). TTS를 쓸 수 없으면 null */
+  voiceUrl: string | null;
 };
 
 export type ServerToClientEvents = {
-  "order:new": (order: OrderDTO) => void;
+  /** voiceUrl: 서버에서 만든 새 주문 안내 음성. TTS를 쓸 수 없으면 null */
+  "order:new": (order: OrderDTO, voiceUrl: string | null) => void;
   "order:updated": (order: OrderDTO) => void;
   "order:call": (payload: OrderCallPayload) => void;
   "menu:changed": () => void;
